@@ -202,9 +202,7 @@ void initActiveBoxIds(void)
 #ifdef USE_GPS
     if (featureIsEnabled(FEATURE_GPS)) {
 #ifdef USE_GPS_RESCUE
-        if (!featureIsEnabled(FEATURE_3D)) {
-            BME(BOXGPSRESCUE);
-        }
+        BME(BOXGPSRESCUE);
 #endif
         BME(BOXBEEPGPSCOUNT);
     }
@@ -232,10 +230,6 @@ void initActiveBoxIds(void)
 #endif
 
     BME(BOXFPVANGLEMIX);
-
-    if (featureIsEnabled(FEATURE_3D)) {
-        BME(BOX3D);
-    }
 
 #ifdef USE_DSHOT
     bool configuredMotorProtocolDshot;
