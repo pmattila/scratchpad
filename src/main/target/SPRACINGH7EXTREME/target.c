@@ -29,7 +29,6 @@
 
 const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
     DEF_TIM(TIM1,  CH1, PA8,  TIM_USE_LED,                 0,  10,  0 ), // LED Strip
-    DEF_TIM(TIM2,  CH4, PB11, TIM_USE_TRANSPONDER,         0,  11,  0 ), // Transponder
 
     DEF_TIM(TIM12, CH2, PB15, TIM_USE_PPM | TIM_USE_PWM,   0,  0,  0 ), // Also USART1 RX
 

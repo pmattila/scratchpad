@@ -56,8 +56,5 @@ const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
     DEF_TIM(TIM2,  CH3, PB10, TIM_USE_MOTOR,       0), // PWM3 - PB10 - *TIM2_CH3, UART3_TX (AF7)
     DEF_TIM(TIM2,  CH4, PB11, TIM_USE_MOTOR,       0), // PWM4 - PB11 - *TIM2_CH4, UART3_RX (AF7)
 
-    // with DSHOT DMA1-CH3 conflicts with TIM3_CH4 / ESC1.
-    DEF_TIM(TIM16, CH1, PB8,  TIM_USE_TRANSPONDER, 0),
-
     DEF_TIM(TIM1,  CH1, PA8,  TIM_USE_LED,         0),
 };

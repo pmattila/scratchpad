@@ -60,5 +60,5 @@ const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
 #endif
     DEF_TIM(TIM2,  CH3, PB10, TIM_USE_MOTOR,                     0), // RC_CH4 - PB10 - *TIM2_CH3, UART3_TX (AF7)
     DEF_TIM(TIM2,  CH4, PB11, TIM_USE_MOTOR,                     0), // RC_CH3 - PB11 - *TIM2_CH4, UART3_RX (AF7)
-    DEF_TIM(TIM1,  CH1, PA8,  TIM_USE_LED | TIM_USE_TRANSPONDER, 0), // LED_STRIP / TRANSPONDER
+    DEF_TIM(TIM1,  CH1, PA8,  TIM_USE_LED,                       0), // LED_STRIP
 };

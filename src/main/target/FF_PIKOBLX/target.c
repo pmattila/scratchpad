@@ -37,7 +37,6 @@ const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
     DEF_TIM(TIM2,  CH3, PA2, TIM_USE_MOTOR,       0), // PWM6  - PA2  - *TIM2_CH3, !TIM15_CH1
     DEF_TIM(TIM3,  CH2, PA4, TIM_USE_PPM,         0), // PPM   - PA4
     DEF_TIM(TIM16, CH1, PB8, TIM_USE_LED,         0),
-    DEF_TIM(TIM1,  CH1, PA8, TIM_USE_TRANSPONDER, 0), // TRANSPONDER - PA8
 #else
     DEF_TIM(TIM3,  CH2, PA4, TIM_USE_MOTOR,       0), // PWM1  - PA4  - *TIM3_CH2
     DEF_TIM(TIM3,  CH1, PA6, TIM_USE_MOTOR,       0), // PWM2  - PA6  - *TIM3_CH1, TIM8_BKIN, TIM1_BKIN, TIM16_CH1
@@ -47,6 +46,5 @@ const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
     DEF_TIM(TIM2,  CH3, PA2, TIM_USE_MOTOR,       0), // PWM6  - PA2  - *TIM2_CH3, !TIM15_CH1
     DEF_TIM(TIM17, CH1, PA7, TIM_USE_PPM,         0), // PPM   - PA7  - *TIM17_CH1, TIM1_CH1N, TIM8_CH1
     DEF_TIM(TIM16, CH1, PB8, TIM_USE_LED,         0),
-    DEF_TIM(TIM1,  CH1, PA8, TIM_USE_TRANSPONDER, 0), // TRANSPONDER - PA8
 #endif
 };
