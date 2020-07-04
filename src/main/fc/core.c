@@ -333,6 +333,9 @@ void updateArmingStatus(void)
 #ifdef USE_FREQ_SENSOR
             && !isFreqSensorInitialized()
 #endif
+#ifdef USE_ESC_SENSOR
+            && !isEscSensorActive()
+#endif
         ) {
             setArmingDisabled(ARMING_DISABLED_RPMFILTER);
         } else {
