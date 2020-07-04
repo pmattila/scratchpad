@@ -49,6 +49,7 @@
 #include "drivers/sound_beeper.h"
 #include "drivers/system.h"
 #include "drivers/time.h"
+#include "drivers/freq.h"
 
 #include "fc/controlrate_profile.h"
 #include "fc/rc.h"
@@ -324,9 +325,15 @@ void updateArmingStatus(void)
 #endif
 
 #ifdef USE_RPM_FILTER
-        // USE_RPM_FILTER will only be defined if USE_DSHOT and USE_DSHOT_TELEMETRY are defined
-        // If the RPM filter is anabled and any motor isn't providing telemetry, then disable arming
-        if (isRpmFilterEnabled() && !isDshotTelemetryActive()) {
+        // If the RPM filter is enabled without RPM source, then disable arming
+        if (isRpmFilterEnabled()
+#ifdef USE_DSHOT_TELEMETRY
+            && !isDshotTelemetryActive()
+#endif
+#ifdef USE_FREQ_SENSOR
+            && !isFreqSensorInitialized()
+#endif
+        ) {
             setArmingDisabled(ARMING_DISABLED_RPMFILTER);
         } else {
             unsetArmingDisabled(ARMING_DISABLED_RPMFILTER);
