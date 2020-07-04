@@ -89,6 +89,7 @@ bool cliMode = false;
 #include "drivers/time.h"
 #include "drivers/timer.h"
 #include "drivers/usb_msc.h"
+#include "drivers/freq.h"
 
 #include "fc/board_info.h"
 #include "fc/controlrate_profile.h"
@@ -142,6 +143,7 @@ bool cliMode = false;
 #include "pg/timerio.h"
 #include "pg/timerup.h"
 #include "pg/usb.h"
+#include "pg/freq.h"
 
 #include "rx/rx_bind.h"
 #include "rx/rx_spi.h"
@@ -255,7 +257,8 @@ static const char * const featureNames[] = {
     "RANGEFINDER", "TELEMETRY", "", "3D", "RX_PARALLEL_PWM",
     "RX_MSP", "RSSI_ADC", "LED_STRIP", "DISPLAY", "OSD",
     "", "CHANNEL_FORWARDING", "", "AIRMODE",
-    "", "", "RX_SPI", "", "ESC_SENSOR", "", "DYNAMIC_FILTER", NULL
+    "", "", "RX_SPI", "", "ESC_SENSOR", "",
+    "DYNAMIC_FILTER", "FREQ_SENSOR", NULL
 };
 
 // sync this with rxFailsafeChannelMode_e
@@ -4581,6 +4584,9 @@ const cliResourceValue_t resourceTable[] = {
 #ifdef USE_PIN_PULL_UP_DOWN
     DEFA( OWNER_PULLUP,        PG_PULLUP_CONFIG,   pinPullUpDownConfig_t, ioTag, PIN_PULL_UP_DOWN_COUNT ),
     DEFA( OWNER_PULLDOWN,      PG_PULLDOWN_CONFIG, pinPullUpDownConfig_t, ioTag, PIN_PULL_UP_DOWN_COUNT ),
+#endif
+#ifdef USE_FREQ_SENSOR
+    DEFA( OWNER_FREQ,          PG_FREQ_CONFIG, freqConfig_t, ioTag, FREQ_SENSOR_PORT_COUNT ),
 #endif
 };
 
