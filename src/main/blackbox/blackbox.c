@@ -189,11 +189,12 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"axisF",       0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
     {"axisF",       1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
     {"axisF",       2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
-    /* rcCommands are encoded together as a group in P-frames: */
+    /* rcCommands are encoded together as a group in P-frames, except rcCommand[COLLECTIVE]: */
     {"rcCommand",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"rcCommand",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"rcCommand",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"rcCommand",   3, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+    {"rcCommand",   4, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
 
     // setpoint - define 4 fields like rcCommand to use the same encoding. setpoint[4] contains the mixer throttle
     {"setpoint",    0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
@@ -300,7 +301,7 @@ typedef struct blackboxMainState_s {
     int32_t axisPID_D[XYZ_AXIS_COUNT];
     int32_t axisPID_F[XYZ_AXIS_COUNT];
 
-    int16_t rcCommand[4];
+    int16_t rcCommand[5];
     int16_t setpoint[4];
     int16_t gyroADC[XYZ_AXIS_COUNT];
     int16_t accADC[XYZ_AXIS_COUNT];
@@ -557,6 +558,9 @@ static void writeIntraframe(void)
      */
     blackboxWriteUnsignedVB(blackboxCurrent->rcCommand[THROTTLE]);
 
+    // Write rcCommand[COLLECTIVE]
+    blackboxWriteSignedVB(blackboxCurrent->rcCommand[COLLECTIVE]);
+
     // Write setpoint roll, pitch, yaw, and throttle
     blackboxWriteSigned16VBArray(blackboxCurrent->setpoint, 4);
 
@@ -663,6 +667,7 @@ static void writeInterframe(void)
 
     int32_t deltas[8];
     int32_t setpointDeltas[4];
+    int32_t collectiveDelta;
 
     arraySubInt32(deltas, blackboxCurrent->axisPID_P, blackboxLast->axisPID_P, XYZ_AXIS_COUNT);
     blackboxWriteSignedVBArray(deltas, XYZ_AXIS_COUNT);
@@ -696,7 +701,11 @@ static void writeInterframe(void)
         setpointDeltas[x] = blackboxCurrent->setpoint[x] - blackboxLast->setpoint[x];
     }
 
+    // Calculate collective delta
+    collectiveDelta = blackboxCurrent->rcCommand[COLLECTIVE] - blackboxLast->rcCommand[COLLECTIVE];
+
     blackboxWriteTag8_4S16(deltas);
+    blackboxWriteSignedVB(collectiveDelta);
     blackboxWriteTag8_4S16(setpointDeltas);
 
     //Check for sensors that are updated periodically (so deltas are normally zero)
@@ -1029,7 +1038,8 @@ static void loadMainState(timeUs_t currentTimeUs)
 #endif
     }
 
-    for (int i = 0; i < 4; i++) {
+    // ROLL/PITCH/YAW/COLLECTIVE
+    for (int i = 0; i < 5; i++) {
         blackboxCurrent->rcCommand[i] = lrintf(rcCommand[i]);
     }
 
