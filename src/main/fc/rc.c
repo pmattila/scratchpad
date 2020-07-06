@@ -757,8 +757,10 @@ FAST_CODE_NOINLINE void updateRcCommands(void)
             rcCommand[YAW] = rcCommandBuff.Z;
         }
     }
-
-    rcCommand[COLLECTIVE] = constrain(rcData[COLLECTIVE] - rxConfig()->midrc, -500, 500);
+    
+    // HF3D:  Adding collective to rcCommands, constrain to -500/+500 range around midrc
+    tmp = constrain(rcData[COLLECTIVE] - rxConfig()->midrc, -500, 500);
+    rcCommand[COLLECTIVE] = tmp;
 }
 
 void resetYawAxis(void)
