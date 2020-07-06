@@ -96,7 +96,8 @@ int16_t servo[MAX_SUPPORTED_SERVOS];
 static uint8_t servoRuleCount = 0;
 static servoMixer_t currentServoMixer[MAX_SERVO_RULES];
 static int useServo;
-
+int servo_override[MAX_SUPPORTED_SERVOS];
+int servo_input_override[5];
 
 #define COUNT_SERVO_RULES(rules) (sizeof(rules) / sizeof(servoMixer_t))
 // mixer rule format servo, input, rate, speed, min, max, box
@@ -220,6 +221,14 @@ int servoDirection(int servoIndex, int inputSource)
 
 void servosInit(void)
 {
+    // Reset servo position override
+    for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+        servo_override[i] = 2001;
+    }
+    for (int i = 0; i < 5; i++) {
+        servo_input_override[i] = 0;
+    }
+    
     // enable servos for mixes that require them. note, this shifts motor counts.
     useServo = mixers[getMixerMode()].useServo;
     // if we want camstab/trig, that also enables servos, even if mixer doesn't
@@ -398,6 +407,9 @@ void writeServos(void)
     }
 }
 
+int32_t swashRingTotal = 0;
+
+// Generic servo mixing from Cleanflight using user-defined smix values for each servo
 void servoMixer(void)
 {
     int16_t input[INPUT_SOURCE_COUNT]; // Range [-500:+500]
@@ -409,9 +421,14 @@ void servoMixer(void)
         input[INPUT_STABILIZED_PITCH] = rcCommand[PITCH];
         input[INPUT_STABILIZED_YAW] = rcCommand[YAW];
     } else {
-        // Assisted modes (gyro only or gyro+acc according to AUX configuration in Gui
-        input[INPUT_STABILIZED_ROLL] = pidData[FD_ROLL].Sum * PID_SERVO_MIXER_SCALING;
-        input[INPUT_STABILIZED_PITCH] = pidData[FD_PITCH].Sum * PID_SERVO_MIXER_SCALING;
+        // Assisted modes (gyro only or gyro+acc according to flight mode / AUX switch configuration)
+        // Default PID_SERVO_MIXER_SCALING = 0.7f
+        // HF3D TODO:  Consider using yawPidSumLimit like mixer.c does for motors?
+        //  * Already added roll/pitch pidSumLimit to this code.
+        //    Default pidSumLimit is 500 on roll/pitch and 400 on yaw, with min/max settable range of 100-1000
+        input[INPUT_STABILIZED_ROLL] = constrainf(pidData[FD_ROLL].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_SERVO_MIXER_SCALING;
+        input[INPUT_STABILIZED_PITCH] = constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_SERVO_MIXER_SCALING;
+		// NOTE:  WIth servo mixer scaling applied to yaw, it means that a pidSum of 1428 (143% in BB Explorer) is needed to max out the yaw channel.
         input[INPUT_STABILIZED_YAW] = pidData[FD_YAW].Sum * PID_SERVO_MIXER_SCALING;
     }
 
@@ -439,7 +456,47 @@ void servoMixer(void)
         servo[i] = 0;
     }
 
-    // mix servos according to rules
+    // HF3D TODO:  Implement collective max/min limit settings and then scale the input RC command to those limits.
+
+    // HF3D TODO:  Does swash ring need to be implemented on the rcCommand side also for roll & pitch?
+    //          Or does that just sort of happen by default when it's implemented on the back-end like this?
+
+    // HF3D:  Swash ring (cyclic ring) functionality and maximum swash tilt limiting (maximum cyclic pitch)
+    //   Without swash ring a full corner cyclic stick deflection would result in up to 141% of the maximum tilt in a single axis
+    //   Default pidSum limit = 500 * 0.7 scale factor = 350 for each of roll and pitch
+    //   Combined output for both axis = sqrt(350^2+350^2) = 495 for the maximum roll+pitch command from the pid loop.  
+    //   Divide each by the combined total to scale them down such that the total combined cyclic command equals the max in one axis.
+    swashRingTotal = sqrt(input[INPUT_STABILIZED_ROLL]*input[INPUT_STABILIZED_ROLL] + input[INPUT_STABILIZED_PITCH]*input[INPUT_STABILIZED_PITCH]);
+    
+    // Check if swashRingTotal combination exceeds the maximum possible deflection in any one direction
+    // HF3D TODO:  Be very cautious of increasing PID_SERVO_MIXER_SCALING in the future code!!  
+    //   ** Users may unexpectedly end up with more cyclic pitch than they originally setup if you change it!
+    //   Maybe change the max criteria to something else?  It's actually the physical servo output we want to limit...
+    // HF3D TODO:  
+    const float swashRingLimit = currentPidProfile->pidSumLimit * PID_SERVO_MIXER_SCALING;
+    if (swashRingTotal > swashRingLimit) {
+        // Limit deflection off-axis if total requested servo deflection is greater than the maximum deflection on any one axis.
+        input[INPUT_STABILIZED_ROLL] = input[INPUT_STABILIZED_ROLL] * swashRingLimit / swashRingTotal;
+        input[INPUT_STABILIZED_PITCH] = input[INPUT_STABILIZED_PITCH] * swashRingLimit / swashRingTotal;
+    }    
+    // NOTE:  pidSumLimit for roll & pitch should be increased until exactly 10 degrees of cyclic pitch is achieved at maximum swash deflection and zero collective pitch
+    //   .... Actually, maybe the rates should be increased/decreased instead of pidSumLimit.  This would allow very similar gains to be used across different size helis as long as max cyclic pitch is similar.
+    
+    // HF3D:  Override servo mixer inputs if user asks us to (via CLI or MSP/Configurator)
+    //   "servo_input_override ON" sets servo_input_override[4] to 1.  OFF sets it to 0.
+    //   "servo_input_override 0 50" sets collective input to 50 (inputs are generally on a -500 to +500 range)
+    //   NOTE:  The only limitations to these overrides are the servo max/min PWM!  Be careful!
+    if (!ARMING_FLAG(ARMED) && servo_input_override[4]) {
+
+        input[INPUT_RC_AUX1] = servo_input_override[0];  // Put collective on the first override since it will be the most common
+        input[INPUT_STABILIZED_ROLL] = servo_input_override[1] * PID_SERVO_MIXER_SCALING;
+        input[INPUT_STABILIZED_PITCH] = servo_input_override[2] * PID_SERVO_MIXER_SCALING;
+        input[INPUT_STABILIZED_YAW] = servo_input_override[3];
+
+    }
+
+    // mix servos according to smix rules
+    //   https://github.com/cleanflight/cleanflight/blob/master/docs/Mixer.md
     for (int i = 0; i < servoRuleCount; i++) {
         // consider rule if no box assigned or box is active
         if (currentServoMixer[i].box == 0 || IS_RC_MODE_ACTIVE(BOXSERVO1 + currentServoMixer[i].box - 1)) {
@@ -449,6 +506,7 @@ void servoMixer(void)
             int16_t min = currentServoMixer[i].min * servo_width / 100 - servo_width / 2;
             int16_t max = currentServoMixer[i].max * servo_width / 100 - servo_width / 2;
 
+            // See if the smix was setup as being speed limited.
             if (currentServoMixer[i].speed == 0)
                 currentOutput[i] = input[from];
             else {
@@ -518,6 +576,19 @@ static void servoTable(void)
         }
     }
 
+    // HF3D:  add offset to servo center position if user asks us to (via CLI or MSP/Configurator)
+    //  When combined with "servo_input_override on" this allows the user to determine servo centers for swashplate leveling
+    //  Recommend first turning on servo_input_override on, adjusting swash level, and then adjusting collective zero point
+    //  Then type "servo_position" to see the new servo output values.  Use the "servo" command to make these the new center point for each servo.
+    if (!ARMING_FLAG(ARMED)) {
+        for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+            if (servo_override[i] < 2000) {
+                //servo[i] = servo_override[i] + determineServoMiddleOrForwardFromChannel(i);
+                servo[i] += servo_override[i];
+            }          
+        }
+    }
+    
     // constrain servos
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         servo[i] = constrain(servo[i], servoParams(i)->min, servoParams(i)->max); // limit the values
@@ -557,3 +628,13 @@ static void filterServos(void)
 #endif
 }
 #endif // USE_SERVOS
+
+float servosGetSwashRingValue(void)
+{
+	if (swashRingTotal > (currentPidProfile->pidSumLimit * PID_SERVO_MIXER_SCALING)) {
+		return 1.0;
+    } else {
+		return ( (float) swashRingTotal / (PID_SERVO_MIXER_SCALING * currentPidProfile->pidSumLimit) );
+	}
+}
+
