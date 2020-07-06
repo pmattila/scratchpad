@@ -304,7 +304,7 @@ void servoDevInit(const servoDevConfig_t *servoConfig)
         const timerHardware_t *timer = timerAllocate(tag, OWNER_SERVO, RESOURCE_INDEX(servoIndex));
 
         if (timer == NULL) {
-            /* flag failure and disable ability to arm */
+            // TODO:  flag failure and disable ability to arm?
             break;
         }
 
@@ -314,7 +314,8 @@ void servoDevInit(const servoDevConfig_t *servoConfig)
         IOConfigGPIOAF(servos[servoIndex].io, IOCFG_AF_PP, timer->alternateFunction);
 #endif
 
-        pwmOutConfig(&servos[servoIndex].channel, timer, PWM_TIMER_1MHZ, PWM_TIMER_1MHZ / servoConfig->servoPwmRate, servoConfig->servoCenterPulse, 0);
+        // HF3D:  Initialize with zero output to support servos with different center pulse widths (removed servoConfig->servoCenterPulse from next to last parameter)
+        pwmOutConfig(&servos[servoIndex].channel, timer, PWM_TIMER_1MHZ, PWM_TIMER_1MHZ / servoConfig->servoPwmRate, 0, 0);
         servos[servoIndex].enabled = true;
     }
 }

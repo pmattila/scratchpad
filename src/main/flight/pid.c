@@ -50,11 +50,15 @@
 #include "flight/mixer.h"
 #include "flight/rpm_filter.h"
 #include "flight/interpolated_setpoint.h"
+#include "flight/servos.h"
 
 #include "io/gps.h"
 
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
+#include "pg/rx.h"
+
+#include "rx/rx.h"
 
 #include "sensors/acceleration.h"
 #include "sensors/battery.h"
@@ -197,6 +201,18 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .dyn_lpf_curve_expo = 5,
         .level_race_mode = false,
         .vbat_sag_compensation = 0,
+        .yawColKf = 300,
+        .yawColPulseKf = 300,
+        .yawCycKf = 0,
+        .yawBaseThrust = 900,
+        .rescue_collective = 200,
+        .error_decay_always = 0,
+        .error_decay_rate = 7,
+        .collective_ff_impulse_freq = 100,
+        .elevator_filter_gain = 50,
+        .elevator_filter_window_time = 75,
+        .elevator_filter_window_size = 30,
+        .elevator_filter_hz = 15,
     );
 #ifndef USE_D_MIN
     pidProfile->pid[PID_ROLL].D = 30;
@@ -234,6 +250,13 @@ typedef union dtermLowpass_u {
 } dtermLowpass_t;
 
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
+
+static FAST_RAM_ZERO_INIT float yawPidSetpoint;
+static FAST_RAM_ZERO_INIT float rescueCollective;
+static FAST_RAM_ZERO_INIT float collectiveStickPercent;
+static FAST_RAM_ZERO_INIT float collectiveStickLPF;
+static FAST_RAM_ZERO_INIT float collectiveStickHPF;
+static FAST_RAM_ZERO_INIT float collectivePulseFilterGain;
 
 static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermNotchApplyFn;
 static FAST_RAM_ZERO_INIT biquadFilter_t dtermNotch[XYZ_AXIS_COUNT];
@@ -283,6 +306,9 @@ static FAST_RAM_ZERO_INIT float ffBoostFactor;
 static FAST_RAM_ZERO_INIT float ffSmoothFactor;
 static FAST_RAM_ZERO_INIT float ffSpikeLimitInverse;
 
+static FAST_RAM_ZERO_INIT filterApplyFnPtr elevatorFilterLowpassApplyFn;
+static FAST_RAM_ZERO_INIT pt1Filter_t elevatorFilterLowpass;
+
 float pidGetSpikeLimitInverse()
 {
     return ffSpikeLimitInverse;
@@ -309,6 +335,7 @@ void pidInitFilters(const pidProfile_t *pidProfile)
         dtermNotchApplyFn = nullFilterApply;
         dtermLowpassApplyFn = nullFilterApply;
         ptermYawLowpassApplyFn = nullFilterApply;
+        elevatorFilterLowpassApplyFn = nullFilterApply;
         return;
     }
 
@@ -434,6 +461,21 @@ void pidInitFilters(const pidProfile_t *pidProfile)
 
     ffBoostFactor = (float)pidProfile->ff_boost / 10.0f;
     ffSpikeLimitInverse = pidProfile->ff_spike_limit ? 1.0f / ((float)pidProfile->ff_spike_limit / 10.0f) : 0.0f;
+    
+    // HF3D: Collective input impulse high-pass filter.
+    // Setting is for cutoff frequency in Hz * 100.
+    // Calculate similar to pt1FilterGain with cutoff frequency of 0.05Hz (20s)
+    //   RC = 1 / ( 2 * M_PI_FLOAT * f_cut);  ==> RC = 3.183
+    //   k = dT / (RC + dT);                  ==>  k = 0.0000393 for 8kHz
+    collectivePulseFilterGain = dT / (dT + (1 / ( 2 * 3.14159f * (float)pidProfile->collective_ff_impulse_freq / 100.0f)));
+    
+    // HF3D:  Elevator Filter (helicopter tail de-bounce)
+    if (pidProfile->elevator_filter_hz == 0 || pidProfile->elevator_filter_hz > pidFrequencyNyquist) {
+        elevatorFilterLowpassApplyFn = nullFilterApply;
+    } else {
+        elevatorFilterLowpassApplyFn = (filterApplyFnPtr)pt1FilterApply;
+        pt1FilterInit(&elevatorFilterLowpass, pt1FilterGain(pidProfile->elevator_filter_hz, dT));
+    }
 }
 
 #ifdef USE_RC_SMOOTHING_FILTER
@@ -545,12 +587,24 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     } else {
         feedForwardTransition = 100.0f / pidProfile->feedForwardTransition;
     }
-    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
-        pidCoefficient[axis].Kp = PTERM_SCALE * pidProfile->pid[axis].P;
-        pidCoefficient[axis].Ki = ITERM_SCALE * pidProfile->pid[axis].I;
-        pidCoefficient[axis].Kd = DTERM_SCALE * pidProfile->pid[axis].D;
-        pidCoefficient[axis].Kf = FEEDFORWARD_SCALE * (pidProfile->pid[axis].F / 100.0f);
-    }
+
+    // Roll axis
+    pidCoefficient[FD_ROLL].Kp = PTERM_SCALE * pidProfile->pid[FD_ROLL].P / 10.0f;
+    pidCoefficient[FD_ROLL].Ki = ITERM_SCALE * pidProfile->pid[FD_ROLL].I / 5.0f;
+    pidCoefficient[FD_ROLL].Kd = DTERM_SCALE * pidProfile->pid[FD_ROLL].D / 10.0f;
+    pidCoefficient[FD_ROLL].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_ROLL].F / 100.0f;
+
+    // Pitch axis
+    pidCoefficient[FD_PITCH].Kp = PTERM_SCALE * pidProfile->pid[FD_PITCH].P / 10.0f;
+    pidCoefficient[FD_PITCH].Ki = ITERM_SCALE * pidProfile->pid[FD_PITCH].I /  5.0f;
+    pidCoefficient[FD_PITCH].Kd = DTERM_SCALE * pidProfile->pid[FD_PITCH].D / 10.0f;
+    pidCoefficient[FD_PITCH].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_PITCH].F / 100.0f;
+
+    // Yaw axis
+    pidCoefficient[FD_YAW].Kp = PTERM_SCALE * pidProfile->pid[FD_YAW].P;
+    pidCoefficient[FD_YAW].Ki = ITERM_SCALE * pidProfile->pid[FD_YAW].I;
+    pidCoefficient[FD_YAW].Kd = DTERM_SCALE * pidProfile->pid[FD_YAW].D;
+    pidCoefficient[FD_YAW].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_YAW].F / 100.0f;
 
     levelGain = pidProfile->pid[PID_LEVEL].P / 10.0f;
     horizonGain = pidProfile->pid[PID_LEVEL].I / 10.0f;
@@ -648,6 +702,8 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 #endif
 
     levelRaceMode = pidProfile->level_race_mode;
+
+    rescueCollective = pidProfile->rescue_collective;
 }
 
 void pidInit(const pidProfile_t *pidProfile)
@@ -669,14 +725,6 @@ void pidAcroTrainerInit(void)
 #endif // USE_ACRO_TRAINER
 
 #ifdef USE_THRUST_LINEARIZATION
-float pidCompensateThrustLinearization(float throttle)
-{
-    if (thrustLinearization != 0.0f) {
-        throttle = throttle * (throttle * thrustLinearization + 1.0f - thrustLinearization);
-    }
-    return throttle;
-}
-
 float pidApplyThrustLinearization(float motorOutput)
 {
     if (thrustLinearization != 0.0f) {
@@ -754,29 +802,77 @@ STATIC_UNIT_TESTED float calcHorizonLevelStrength(void)
     return constrainf(horizonLevelStrength, 0, 1);
 }
 
-// Use the FAST_CODE_NOINLINE directive to avoid this code from being inlined into ITCM RAM to avoid overflow.
-// The impact is possibly slightly slower performance on F7/H7 but they have more than enough
-// processing power that it should be a non-issue.
 STATIC_UNIT_TESTED FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, float currentPidSetpoint) {
-    // calculate error angle and limit the angle to the max inclination
-    // rcDeflection is in range [-1.0, 1.0]
-    float angle = pidProfile->levelAngleLimit * getRcDeflection(axis);
-#ifdef USE_GPS_RESCUE
-    angle += gpsRescueAngle[axis] / 100; // ANGLE IS IN CENTIDEGREES
-#endif
-    angle = constrainf(angle, -pidProfile->levelAngleLimit, pidProfile->levelAngleLimit);
-    const float errorAngle = angle - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
-    if (FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(GPS_RESCUE_MODE)) {
-        // ANGLE mode - control is angle based
-        currentPidSetpoint = errorAngle * levelGain;
+
+    if (FLIGHT_MODE(ANGLE_MODE)) {
+        // Angle mode is now rescue mode.
+        float errorAngle = 0.0f;
+
+        // -90 Pitch is straight up and +90 is straight down
+        // We are always pitching to "zero" whether up-right or inverted
+        //   but the control direction needed to get to up-right is different than inverted
+        // Determine if we're closer to up-right or inverted by checking for abs(roll attitude) > 90
+        // HF3D TODO:  Evaluate using hysteresis to ensure we don't get "stuck" at one of the inflection points below.
+        if (((attitude.raw[FD_ROLL] - angleTrim->raw[FD_ROLL]) / 10.0f) > 90.0f) {
+            // Rolled right closer to inverted, continue to roll right to inverted (+180 degrees)
+            if (axis == FD_PITCH) {
+                errorAngle = 0.0f + ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            } else if (axis == FD_ROLL) {
+                errorAngle = 180.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            }
+        } else if (((attitude.raw[FD_ROLL] - angleTrim->raw[FD_ROLL]) / 10.0f) < -90.0f) {    
+            // Rolled left closer to inverted, continue to roll left to inverted (-180 degrees)
+            if (axis == FD_PITCH) {
+                errorAngle = 0.0f + ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            } else if (axis == FD_ROLL) {
+                errorAngle = -180.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            }
+        } else {
+            // We're rolled left or right between -90 and 90, and thus are closer to up-right (0 degrees aka skids down)
+            if (axis == FD_PITCH) {
+                errorAngle = 0.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            } else if (axis == FD_ROLL) {
+                errorAngle = 0.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+            }
+        }
+        // NOTE:  If you want to level to only up-right, it would probably be best to just level inverted and
+        //   then flip to upright later on.
+        //   But if you really can only level to up-right (no negative collective avaiable), then it's probably
+        //     best to flip use the pitch direction logic above but just always roll back to up-right.
+        //   That way you will be putting in the correct pitch direction while you're inverted also.  Otherwise
+        //     you will be putting in the wrong pitch correction during the time you're inverted.  Not good, especially
+        //     since "roll" gets wonky near straight up/down.
+        currentPidSetpoint = errorAngle * levelGain;   
+        return currentPidSetpoint;
+
     } else {
-        // HORIZON mode - mix of ANGLE and ACRO modes
-        // mix in errorAngle to currentPidSetpoint to add a little auto-level feel
-        const float horizonLevelStrength = calcHorizonLevelStrength();
-        currentPidSetpoint = currentPidSetpoint + (errorAngle * horizonGain * horizonLevelStrength);
+        // Horizon and GPS Rescue modes
+        // calculate error angle and limit the angle to the max inclination
+        // rcDeflection is in range [-1.0, 1.0]
+        float angle = pidProfile->levelAngleLimit * getRcDeflection(axis);
+
+        // HF3D TODO:  Think about fixing GPS rescue for level/inverted rescue... probably just need to only make it worth it non-inverted rescue
+#ifdef USE_GPS_RESCUE
+        angle += gpsRescueAngle[axis] / 100; // ANGLE IS IN CENTIDEGREES
+#endif
+        angle = constrainf(angle, -pidProfile->levelAngleLimit, pidProfile->levelAngleLimit);
+
+        const float errorAngle = angle - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+
+        if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
+            // ANGLE mode - control is angle based
+            currentPidSetpoint = errorAngle * levelGain;
+        } else {
+            // HORIZON mode - mix of ANGLE and ACRO modes
+            // mix in errorAngle to currentPidSetpoint to add a little auto-level feel
+            const float horizonLevelStrength = calcHorizonLevelStrength();
+            currentPidSetpoint = currentPidSetpoint + (errorAngle * horizonGain * horizonLevelStrength);
+        }
+        
+        return currentPidSetpoint;
     }
-    return currentPidSetpoint;
 }
+
 #endif // USE_ACC
 
 #ifdef USE_ACRO_TRAINER
@@ -958,7 +1054,16 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
             acErrorRate = (gyroRate > gmaxac ? gmaxac : gminac ) - gyroRate;
         }
 
-        if (isAirmodeActivated()) {
+        // Check to ensure we are spooled up at a reasonable level
+        if (isHeliSpooledUp()) {
+            // Integrate the angle rate error, which gives us the accumulated angle error for this axis
+            //  Limit the total angle error to the range defined by pidProfile->abs_control_error_limit
+			if (axis == FD_ROLL || axis == FD_PITCH) {
+				// Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+				if (fabsf(pidData[axis].Sum) >= PIDSUM_LIMIT) {
+					acErrorRate = 0;
+				}
+			}
             axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT,
                 -acErrorLimit, acErrorLimit);
             const float acCorrection = constrainf(axisError[axis] * acGain, -acLimit, acLimit);
@@ -1090,12 +1195,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     gpsRescuePreviousState = gpsRescueIsActive;
 #endif
 
-    // gradually scale back integration when above windup point
-    float dynCi = dT;
-    if (itermWindupPointInv > 1.0f) {
-        dynCi *= constrainf((1.0f - getMotorMixRange()) * itermWindupPointInv, 0.0f, 1.0f);
-    }
-
     // Precalculate gyro deta for D-term here, this allows loop unrolling
     float gyroRateDterm[XYZ_AXIS_COUNT];
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
@@ -1143,6 +1242,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             FALLTHROUGH;
         case LEVEL_MODE_RP:
             if (axis == FD_YAW) {
+                // HF3D: Rescue TODO
                 break;
             }
             currentPidSetpoint = pidLevel(axis, pidProfile, angleTrim, currentPidSetpoint);
@@ -1154,6 +1254,18 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             currentPidSetpoint = applyAcroTrainer(axis, angleTrim, currentPidSetpoint);
         }
 #endif // USE_ACRO_TRAINER
+
+#ifdef USE_PIRO_COMP
+        // HF3D TODO:  Flat pirouette compensation
+        //  Compensate for the fact that the main shaft axis is not aligned with the Z axis due to the roll tilt required to compensate for tail blade thrust
+        //  Create a wobble of the main shaft axis around the Z axis by adding roll and pitch commands proportional to the yaw rotation rate
+        if (axis == FD_ROLL && throttleBoost > 1.0f) {
+            // HF3D TODO:  Change roll compensation sign based on main motor rotation direction (tail thrust direction)
+            currentPidSetpoint += fabsf(yawPidSetpoint) / throttleBoost;    // Roll compensation direction is same regardless of yaw direction
+        } else if (axis == FD_PITCH && throttleBoost > 1.0f) {
+            currentPidSetpoint += yawPidSetpoint / throttleBoost;          // Pitch compensation direction depends on yaw direction
+        }
+#endif
 
         // -----calculate error rate
         const float gyroRate = gyro.gyroADCf[axis]; // Process variable from gyro output in deg/sec
@@ -1174,6 +1286,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         float setpointCorrection = currentPidSetpoint - uncorrectedSetpoint;
 #endif
 
+        // HF3D:  After all setpoint changes are done, get Yaw setpoint for flat pirouette compensation
+        if (axis == FD_YAW) {
+            yawPidSetpoint = currentPidSetpoint;
+        }
+
         // --------low-level gyro-based PID based on 2DOF PID controller. ----------
         // 2-DOF PID controller with optional filter on derivative term.
         // b = 1 and only c (feedforward weight) can be tuned (amount derivative on measurement or error).
@@ -1186,8 +1303,24 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // -----calculate I component
         float Ki = pidCoefficient[axis].Ki;
-        float axisDynCi = (axis == FD_YAW) ? dynCi : dT; // only apply windup protection to yaw
-        pidData[axis].I = constrainf(previousIterm + Ki * axisDynCi * itermErrorRate, -itermLimit, itermLimit);
+        if (axis == FD_ROLL || axis == FD_PITCH) {
+            // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+            if (fabsf(pidData[axis].Sum) >= pidProfile->pidSumLimit) {
+                Ki = 0;
+            }
+        }
+        pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
+
+        // Decay accumulated error if appropriate
+#define signorzero(x) ((x < 0) ? -1 : (x > 0) ? 1 : 0)
+        if (!isHeliSpooledUp() || pidProfile->error_decay_always) {
+            // Calculate number of degrees to remove from the accumulated error
+            const float decayFactor = pidProfile->error_decay_rate * dT;
+            pidData[axis].I -= signorzero(pidData[axis].I) * decayFactor * Ki;
+#if defined(USE_ABSOLUTE_CONTROL)
+            axisError[axis] -= signorzero(axisError[axis]) * decayFactor;
+#endif
+        }
 
         // -----calculate pidSetpointDelta
         float pidSetpointDelta = 0;
@@ -1251,21 +1384,138 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #endif
 
         // Only enable feedforward for rate mode (flightModeFlag=0 is acro/rate mode)
-        const float feedforwardGain = (flightModeFlags) ? 0.0f : pidCoefficient[axis].Kf;
+        // HF3D:  Changed this so horizon & angle modes have feedforward also
+        const float feedforwardGain = pidCoefficient[axis].Kf;
+        static timeUs_t lastTimeEleOutsideWindow = 0;
+        float eleOffset = 0.0f;
+        
         if (feedforwardGain > 0) {
-            // no transition if feedForwardTransition == 0
-            float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
-            float feedForward = feedforwardGain * transition * pidSetpointDelta * pidFrequency;
+            // transition = 1 if feedForwardTransition == 0   (no transition)
+            float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1.0f;
+
+            // Apply elevator filter to stop bounces due to sudden stops on the pitch axis near zero deg/s
+            //  These do not seem to be related to I term or Absolute control, or really any of the PID terms
+            //  High feedforward gain seems to make them worse due to the aggressive nature of the return to zero.
+            if (axis == FD_PITCH && pidProfile->elevator_filter_gain > 0) {
+                
+                float elevatorSetpointLPF = elevatorFilterLowpassApplyFn((filter_t *) &elevatorFilterLowpass, currentPidSetpoint);
+                
+                // Store the last time we were outside of the deg/s window we decided upon
+                if (fabsf(currentPidSetpoint) >= pidProfile->elevator_filter_window_size) {
+                    lastTimeEleOutsideWindow = currentTimeUs;
+            
+                } else if (cmpTimeUs(currentTimeUs, lastTimeEleOutsideWindow) < (pidProfile->elevator_filter_window_time * 1000)) {
+                    // We're inside the deg/s window and we've recently been outside of it
+                    // Cutoff time for compare should be maybe 2-3x the cutoff frequency period??
+                    //  Note that this will also catch the times that we're just transiting through center quickly... which sucks, but what is the other choice??
+                    //  Luckily, the moment we get outside the window we'll go back to full blast of feedforward on the pitch axis, so it may not be very noticeable during fast stick movements.
+
+                    // Apply the elevator filter offset to help gradually slow us down.
+                    // There will be a slightly discontinuity in the pitch feedforward as we hit the elevator filter window.
+                    // Should be relative to the amount of feedforward gain.  More Kf -> More elevator offset.
+                    // elevator_filter_gain = 100 will give 1:1 offset between the LPF and setPoint.
+                    //   As we enter the window eleOffset will start high and slowly decay down to zero over time.
+                    eleOffset = (elevatorSetpointLPF - currentPidSetpoint) * feedforwardGain * 90.0f * transition * pidProfile->elevator_filter_gain / 100.0f;
+                }
+                
+                // If it's been a while since we've been outside of our cutoff window then don't do anything different.
+                //   Otherwise we will slow down fast stick movements, and we don't want that!  We only want to change the stop characteristics around center stick.
+            }
+            
+            // HF3D:  Direct stick feedforward for roll and pitch.  Stick delta feedforward for yaw.
+            // Let's do direct stick feedforward for roll & pitch, and let's AMP IT UP A LOT.
+            // 0.013754 * 90 * 1 * 60 deg/s = 74 output for 100 feedForward gain
+            float feedForward = feedforwardGain * 90.0f * transition * currentPidSetpoint;
+            if (axis == FD_PITCH) {
+                feedForward += eleOffset;
+                // Store the elevator filter offset value into the AC_CORRECTION debug channel (absolute control) since it isn't used otherwise
+                DEBUG_SET(DEBUG_AC_CORRECTION, 3, lrintf(eleOffset));
+            } else if (axis == FD_YAW) {
+                // Stick delta feedforward for the yaw axis.
+                feedForward = feedforwardGain * transition * pidSetpointDelta * pidFrequency;    //  Kf * 1 * 20 deg/s * 8000
+            }
 
 #ifdef USE_INTERPOLATED_SP
-            pidData[axis].F = shouldApplyFfLimits(axis) ?
-                applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint) : feedForward;
+            // HF3D:  Only apply feedforward interpolation limits to the Yaw axis since we're using direct feedforward on the roll and pitch axes.
+            if (axis == FD_YAW) {
+                pidData[axis].F = shouldApplyFfLimits(axis) ?
+                    applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint) : feedForward;
+            } else {
+               pidData[axis].F = feedForward;
+            }               
 #else
             pidData[axis].F = feedForward;
 #endif
         } else {
             pidData[axis].F = 0;
         }
+
+         // HF3D:  Calculate tail feedforward precompensation and add it to the pidSum on the Yaw channel
+        if (axis == FD_YAW) {
+            
+            // Calculate absolute value of the percentage of collective stick throw
+            if ((rcCommand[COLLECTIVE] >= 500) || (rcCommand[COLLECTIVE] <= -500)) {
+                collectiveStickPercent = 100.0f;
+            } else {
+                if (rcCommand[COLLECTIVE] >= 0) {
+                    collectiveStickPercent = (rcCommand[COLLECTIVE] * 100.0f) / (PWM_RANGE_MAX - rxConfig()->midrc);
+                } else if (rcCommand[COLLECTIVE] < 0) {
+                    collectiveStickPercent = (rcCommand[COLLECTIVE] * -100.0f) / (rxConfig()->midrc - PWM_RANGE_MIN);
+                }
+            }
+            
+            // Collective pitch impulse feed-forward for the main motor
+            // Run our collectiveStickPercent through a low pass filter
+            collectiveStickLPF = collectiveStickLPF + collectivePulseFilterGain * (collectiveStickPercent - collectiveStickLPF);
+            // Subtract LPF from the original value to get a high pass filter
+            // HPF value will be <60% or so of the collectiveStickPercent, and will be smaller the slower the stick movement is.
+            //  Cutoff frequency determines this action.
+            collectiveStickHPF = collectiveStickPercent - collectiveStickLPF;
+
+            // HF3D TODO:  Negative because of clockwise main rotor spin direction -> CCW body torque on helicopter
+            //   Implement a configuration parameter for rotor rotation direction
+            float tailCollectiveFF = -1.0f * collectiveStickPercent * pidProfile->yawColKf / 100.0f;
+            float tailCollectivePulseFF = -1.0f * collectiveStickHPF * pidProfile->yawColPulseKf / 100.0f;
+            float tailBaseThrust = -1.0f * pidProfile->yawBaseThrust / 10.0f;
+            
+            // Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
+			float tailCyclicFF = -1.0f * servosGetSwashRingValue() * 100.0f * pidProfile->yawCycKf / 100.0f;
+            
+            // Main motor torque increase from the ESC is proportional to the absolute change in average voltage (NOT percent change in average voltage)
+            //     and it is linear with the amount of change.
+            // Main motor torque will always cause the tail to rotate in in the same direction, so we just need to apply this offset in the correct direction to counter-act that torque.
+            // For CW rotation of the main rotor, the torque will turn the body of the helicopter CCW
+            //   This means the leading edge of the tail blade needs to tip towards the left side of the helicopter to counteract it.
+            //   Yaw stick right = clockwise rotation = tip of tail blade to left = POSITIVE servo values observed on the X3
+            //      NOTE:  Servo values required to obtain a certain direction of change in the tail depends on which side the servo is mounted and if it's a leading or trailing link!!
+            //      It is very important to set the servo reversal configuration up correctly so the servo moves in the same direction as the Preview model!
+            //   Yaw stick right = positive control channel PWM values from the TX also.
+            //   Smix on my rudder channel is setup for -100... so it will take NEGATIVE values in the pidSum to create positive servo movement!
+
+            //   So my collective comp also needs to make positive tail servo values, which means that I need a NEGATIVE adder to the pidSum due to the channel rate reversal.
+            //     But, this should always work for all helis that are also setup correctly, regardless of servo reversal...
+            //     ... as long as it yaws the correct direction to match the Preview model.
+            //     ... and as long as the main motor rotation direction is CW!  CCW rotation will require reversing this and generating POSITIVE pidSum additions!
+            // HF3D TODO:  Add a "main rotor rotation direction" configuration parameter.
+            
+            // HF3D TODO:  Consider adding a delay in here to allow time for other things to occur...
+            //  Tail servo can probably add pitch faster than the swash servos can add collective pitch
+            //   and it's also probably faster than the ESC can add torque to the main motor (for gov impulse)
+            //  But for motor-driven tails the delay may not be needed... depending on how fast the ESC+motor
+            //   can spin up the tail blades relative to the other pieces of the puzzle.
+            
+            // Add our collective feedforward terms into the yaw axis pidSum as long as we don't have a motor driven tail
+            // Only if we're armed and throttle > 15 use the tail feedforwards.  If we're auto-rotating then there's no use for all this stuff.  It will just screw up our tail position since there's no main motor torque!!
+            // HF3D TODO:  Add a configurable override for this check in case someone wants to run an external governor without passing the throttle signal through the flight controller?
+            if ((calculateThrottlePercentAbs() > 15) || (!ARMING_FLAG(ARMED))) {
+                // if disarmed, show the user what they will get regardless of throttle value
+                pidData[FD_YAW].F += tailCollectiveFF + tailCollectivePulseFF + tailBaseThrust + tailCyclicFF;
+            } 
+            // HF3D TODO:  Do some integration of the motor driven tail code here for motorCount == 2...
+            //   But have to be careful, because if main motor throttle goes near zero then we'll never get the tail back if we're
+            //   adding feedforward that doesn't need to be there.  We can't create negative thrust with a motor driven fixed pitch tail.
+                        
+        }       
 
         // calculating the PID sum
         const float pidSum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
@@ -1281,7 +1531,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     }
 
     // Disable PID control if at zero throttle or if gyro overflow detected
-    // This may look very innefficient, but it is done on purpose to always show real CPU usage as in flight
+    // This may look very inefficient, but it is done on purpose to always show real CPU usage as in flight
+    // HF3D TODO:  We're not really using this right now since we're decaying accumulated error in the main PID loop to handle initial spool-up
     if (!pidStabilisationEnabled || gyroOverflowDetected()) {
         for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
             pidData[axis].P = 0;
@@ -1358,3 +1609,24 @@ float pidGetPidFrequency()
 {
     return pidFrequency;
 }
+
+float pidGetCollectiveStickPercent()
+{
+    return collectiveStickPercent;
+}
+
+float pidGetCollectiveStickHPF()
+{
+    return collectiveStickHPF;
+}
+
+uint16_t pidGetRescueCollectiveSetting()
+{
+    return rescueCollective;
+}
+
+float pidGetCollectivePulseFilterGain(void)
+{
+    return collectivePulseFilterGain;
+}
+
