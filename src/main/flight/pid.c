@@ -50,11 +50,15 @@
 #include "flight/mixer.h"
 #include "flight/rpm_filter.h"
 #include "flight/interpolated_setpoint.h"
+#include "flight/servos.h"
 
 #include "io/gps.h"
 
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
+#include "pg/rx.h"
+
+#include "rx/rx.h"
 
 #include "sensors/acceleration.h"
 #include "sensors/battery.h"
@@ -191,6 +195,11 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .ff_boost = 15,
         .dyn_lpf_curve_expo = 5,
         .vbat_sag_compensation = 0,
+        .yawColKf = 300,
+        .yawColPulseKf = 300,
+        .yawCycKf = 0,
+        .yawBaseThrust = 900,
+        .collective_ff_impulse_freq = 100,
     );
 #ifndef USE_D_MIN
     pidProfile->pid[PID_ROLL].D = 30;
@@ -228,6 +237,11 @@ typedef union dtermLowpass_u {
 } dtermLowpass_t;
 
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
+
+static FAST_RAM_ZERO_INIT float collectiveStickPercent;
+static FAST_RAM_ZERO_INIT float collectiveStickLPF;
+static FAST_RAM_ZERO_INIT float collectiveStickHPF;
+static FAST_RAM_ZERO_INIT float collectivePulseFilterGain;
 
 static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermNotchApplyFn;
 static FAST_RAM_ZERO_INIT biquadFilter_t dtermNotch[XYZ_AXIS_COUNT];
@@ -416,6 +430,13 @@ void pidInitFilters(const pidProfile_t *pidProfile)
 #endif
     ffBoostFactor = (float)pidProfile->ff_boost / 10.0f;
     ffSpikeLimitInverse = pidProfile->ff_spike_limit ? 1.0f / ((float)pidProfile->ff_spike_limit / 10.0f) : 0.0f;
+    
+    // HF3D: Collective input impulse high-pass filter.
+    // Setting is for cutoff frequency in Hz * 100.
+    // Calculate similar to pt1FilterGain with cutoff frequency of 0.05Hz (20s)
+    //   RC = 1 / ( 2 * M_PI_FLOAT * f_cut);  ==> RC = 3.183
+    //   k = dT / (RC + dT);                  ==>  k = 0.0000393 for 8kHz
+    collectivePulseFilterGain = dT / (dT + (1 / ( 2 * 3.14159f * (float)pidProfile->collective_ff_impulse_freq / 100.0f)));
 }
 
 #ifdef USE_RC_SMOOTHING_FILTER
@@ -644,14 +665,6 @@ void pidAcroTrainerInit(void)
 #endif // USE_ACRO_TRAINER
 
 #ifdef USE_THRUST_LINEARIZATION
-float pidCompensateThrustLinearization(float throttle)
-{
-    if (thrustLinearization != 0.0f) {
-        throttle = throttle * (throttle * thrustLinearization + 1.0f - thrustLinearization);
-    }
-    return throttle;
-}
-
 float pidApplyThrustLinearization(float motorOutput)
 {
     if (thrustLinearization != 0.0f) {
@@ -729,13 +742,12 @@ STATIC_UNIT_TESTED float calcHorizonLevelStrength(void)
     return constrainf(horizonLevelStrength, 0, 1);
 }
 
-// Use the FAST_CODE_NOINLINE directive to avoid this code from being inlined into ITCM RAM to avoid overflow.
-// The impact is possibly slightly slower performance on F7/H7 but they have more than enough
-// processing power that it should be a non-issue.
-STATIC_UNIT_TESTED FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, float currentPidSetpoint) {
+FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, float currentPidSetpoint)
+{
     // calculate error angle and limit the angle to the max inclination
     // rcDeflection is in range [-1.0, 1.0]
     float angle = pidProfile->levelAngleLimit * getRcDeflection(axis);
+
 #ifdef USE_GPS_RESCUE
     angle += gpsRescueAngle[axis] / 100; // ANGLE IS IN CENTIDEGREES
 #endif
@@ -933,6 +945,20 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
             acErrorRate = (gyroRate > gmaxac ? gmaxac : gminac ) - gyroRate;
         }
 
+        // Check to ensure we are spooled up at a reasonable level
+        if (isHeliSpooledUp()) {
+            // Integrate the angle rate error, which gives us the accumulated angle error for this axis
+            //  Limit the total angle error to the range defined by pidProfile->abs_control_error_limit
+            axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT,
+                -acErrorLimit, acErrorLimit);
+            const float acCorrection = constrainf(axisError[axis] * acGain, -acLimit, acLimit);
+            *currentPidSetpoint += acCorrection;
+            *itermErrorRate += acCorrection;
+            DEBUG_SET(DEBUG_AC_CORRECTION, axis, lrintf(acCorrection * 10));
+            if (axis == FD_ROLL) {
+                DEBUG_SET(DEBUG_ITERM_RELAX, 3, lrintf(acCorrection * 10));
+            }
+        }
         DEBUG_SET(DEBUG_AC_ERROR, axis, lrintf(axisError[axis] * 10));
     }
 }
@@ -1025,12 +1051,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     gpsRescuePreviousState = gpsRescueIsActive;
 #endif
 
-    // gradually scale back integration when above windup point
-    float dynCi = dT;
-    if (itermWindupPointInv > 1.0f) {
-        dynCi *= constrainf((1.0f - getMotorMixRange()) * itermWindupPointInv, 0.0f, 1.0f);
-    }
-
     // Precalculate gyro deta for D-term here, this allows loop unrolling
     float gyroRateDterm[XYZ_AXIS_COUNT];
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
@@ -1120,8 +1140,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // -----calculate I component
         float Ki = pidCoefficient[axis].Ki;
-        float axisDynCi = (axis == FD_YAW) ? dynCi : dT; // only apply windup protection to yaw
-        pidData[axis].I = constrainf(previousIterm + Ki * axisDynCi * itermErrorRate, -itermLimit, itermLimit);
+        pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
 
         // -----calculate pidSetpointDelta
         float pidSetpointDelta = 0;
@@ -1186,20 +1205,100 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // Only enable feedforward for rate mode (flightModeFlag=0 is acro/rate mode)
         const float feedforwardGain = (flightModeFlags) ? 0.0f : pidCoefficient[axis].Kf;
+        
         if (feedforwardGain > 0) {
-            // no transition if feedForwardTransition == 0
-            float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
-            float feedForward = feedforwardGain * transition * pidSetpointDelta * pidFrequency;
+            // transition = 1 if feedForwardTransition == 0   (no transition)
+            float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1.0f;
+
+            // HF3D:  Direct stick feedforward for roll and pitch.  Stick delta feedforward for yaw.
+            // Let's do direct stick feedforward for roll & pitch, and let's AMP IT UP A LOT.
+            // 0.013754 * 90 * 1 * 60 deg/s = 74 output for 100 feedForward gain
+            float feedForward = feedforwardGain * 90.0f * transition * currentPidSetpoint;
+            if (axis == FD_YAW) {
+                feedForward = feedforwardGain * transition * pidSetpointDelta * pidFrequency;    //  Kf * 1 * 20 deg/s * 8000
+            }
 
 #ifdef USE_INTERPOLATED_SP
-            pidData[axis].F = shouldApplyFfLimits(axis) ?
-                applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint) : feedForward;
+            // HF3D:  Only apply feedforward interpolation limits to the Yaw axis since we're using direct feedforward on the roll and pitch axes.
+            if (axis == FD_YAW) {
+                pidData[axis].F = shouldApplyFfLimits(axis) ?
+                    applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint) : feedForward;
+            } else {
+               pidData[axis].F = feedForward;
+            }               
 #else
             pidData[axis].F = feedForward;
 #endif
         } else {
             pidData[axis].F = 0;
         }
+
+         // HF3D:  Calculate tail feedforward precompensation and add it to the pidSum on the Yaw channel
+        if (axis == FD_YAW) {
+            
+            // Calculate absolute value of the percentage of collective stick throw
+            if ((rcCommand[COLLECTIVE] >= 500) || (rcCommand[COLLECTIVE] <= -500)) {
+                collectiveStickPercent = 100.0f;
+            } else {
+                if (rcCommand[COLLECTIVE] >= 0) {
+                    collectiveStickPercent = (rcCommand[COLLECTIVE] * 100.0f) / (PWM_RANGE_MAX - rxConfig()->midrc);
+                } else if (rcCommand[COLLECTIVE] < 0) {
+                    collectiveStickPercent = (rcCommand[COLLECTIVE] * -100.0f) / (rxConfig()->midrc - PWM_RANGE_MIN);
+                }
+            }
+            
+            // Collective pitch impulse feed-forward for the main motor
+            // Run our collectiveStickPercent through a low pass filter
+            collectiveStickLPF = collectiveStickLPF + collectivePulseFilterGain * (collectiveStickPercent - collectiveStickLPF);
+            // Subtract LPF from the original value to get a high pass filter
+            // HPF value will be <60% or so of the collectiveStickPercent, and will be smaller the slower the stick movement is.
+            //  Cutoff frequency determines this action.
+            collectiveStickHPF = collectiveStickPercent - collectiveStickLPF;
+
+            // HF3D TODO:  Negative because of clockwise main rotor spin direction -> CCW body torque on helicopter
+            //   Implement a configuration parameter for rotor rotation direction
+            float tailCollectiveFF = -1.0f * collectiveStickPercent * pidProfile->yawColKf / 100.0f;
+            float tailCollectivePulseFF = -1.0f * collectiveStickHPF * pidProfile->yawColPulseKf / 100.0f;
+            float tailBaseThrust = -1.0f * pidProfile->yawBaseThrust / 10.0f;
+            
+            // Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
+            float tailCyclicFF = -1.0f * servosGetCyclicDeflection() * 100.0f * pidProfile->yawCycKf / 100.0f;
+            
+            // Main motor torque increase from the ESC is proportional to the absolute change in average voltage (NOT percent change in average voltage)
+            //     and it is linear with the amount of change.
+            // Main motor torque will always cause the tail to rotate in in the same direction, so we just need to apply this offset in the correct direction to counter-act that torque.
+            // For CW rotation of the main rotor, the torque will turn the body of the helicopter CCW
+            //   This means the leading edge of the tail blade needs to tip towards the left side of the helicopter to counteract it.
+            //   Yaw stick right = clockwise rotation = tip of tail blade to left = POSITIVE servo values observed on the X3
+            //      NOTE:  Servo values required to obtain a certain direction of change in the tail depends on which side the servo is mounted and if it's a leading or trailing link!!
+            //      It is very important to set the servo reversal configuration up correctly so the servo moves in the same direction as the Preview model!
+            //   Yaw stick right = positive control channel PWM values from the TX also.
+            //   Smix on my rudder channel is setup for -100... so it will take NEGATIVE values in the pidSum to create positive servo movement!
+
+            //   So my collective comp also needs to make positive tail servo values, which means that I need a NEGATIVE adder to the pidSum due to the channel rate reversal.
+            //     But, this should always work for all helis that are also setup correctly, regardless of servo reversal...
+            //     ... as long as it yaws the correct direction to match the Preview model.
+            //     ... and as long as the main motor rotation direction is CW!  CCW rotation will require reversing this and generating POSITIVE pidSum additions!
+            // HF3D TODO:  Add a "main rotor rotation direction" configuration parameter.
+            
+            // HF3D TODO:  Consider adding a delay in here to allow time for other things to occur...
+            //  Tail servo can probably add pitch faster than the swash servos can add collective pitch
+            //   and it's also probably faster than the ESC can add torque to the main motor (for gov impulse)
+            //  But for motor-driven tails the delay may not be needed... depending on how fast the ESC+motor
+            //   can spin up the tail blades relative to the other pieces of the puzzle.
+            
+            // Add our collective feedforward terms into the yaw axis pidSum as long as we don't have a motor driven tail
+            // Only if we're armed and throttle > 15 use the tail feedforwards.  If we're auto-rotating then there's no use for all this stuff.  It will just screw up our tail position since there's no main motor torque!!
+            // HF3D TODO:  Add a configurable override for this check in case someone wants to run an external governor without passing the throttle signal through the flight controller?
+            if ((calculateThrottlePercentAbs() > 15) || (!ARMING_FLAG(ARMED))) {
+                // if disarmed, show the user what they will get regardless of throttle value
+                pidData[FD_YAW].F += tailCollectiveFF + tailCollectivePulseFF + tailBaseThrust + tailCyclicFF;
+            } 
+            // HF3D TODO:  Do some integration of the motor driven tail code here for motorCount == 2...
+            //   But have to be careful, because if main motor throttle goes near zero then we'll never get the tail back if we're
+            //   adding feedforward that doesn't need to be there.  We can't create negative thrust with a motor driven fixed pitch tail.
+                        
+        }       
 
         // calculating the PID sum
         const float pidSum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
@@ -1215,7 +1314,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     }
 
     // Disable PID control if at zero throttle or if gyro overflow detected
-    // This may look very innefficient, but it is done on purpose to always show real CPU usage as in flight
+    // This may look very inefficient, but it is done on purpose to always show real CPU usage as in flight
     if (!pidStabilisationEnabled || gyroOverflowDetected()) {
         for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
             pidData[axis].P = 0;
@@ -1292,3 +1391,19 @@ float pidGetPidFrequency()
 {
     return pidFrequency;
 }
+
+float pidGetCollectiveStickPercent()
+{
+    return collectiveStickPercent;
+}
+
+float pidGetCollectiveStickHPF()
+{
+    return collectiveStickHPF;
+}
+
+float pidGetCollectivePulseFilterGain(void)
+{
+    return collectivePulseFilterGain;
+}
+
