@@ -114,7 +114,6 @@ enum {
 enum {
     ARMING_DELAYED_DISARMED = 0,
     ARMING_DELAYED_NORMAL = 1,
-    ARMING_DELAYED_CRASHFLIP = 2,
 };
 
 #define GYRO_WATCHDOG_DELAY 80 //  delay for gyro sync
@@ -143,7 +142,6 @@ int16_t magHold;
 
 static FAST_RAM_ZERO_INIT uint8_t pidUpdateCounter;
 
-static bool flipOverAfterCrashActive = false;
 
 static timeUs_t disarmAt;     // Time of automatic disarm when "Don't spin the motors when armed" is enabled and auto_disarm_delay is nonzero
 
@@ -241,17 +239,12 @@ void updateArmingStatus(void)
         if ((getArmingDisableFlags() & ARMING_DISABLED_BOOT_GRACE_TIME) && (millis() >= systemConfig()->powerOnArmingGraceTime * 1000)
 #ifdef USE_DSHOT
             // We also need to prevent arming until it's possible to send DSHOT commands.
-            // Otherwise if the initial arming is in crash-flip the motor direction commands
-            // might not be sent.
             && (!isMotorProtocolDshot() || dshotCommandsAreEnabled(DSHOT_CMD_TYPE_INLINE))
 #endif
         ) {
             // If so, unset the grace time arming disable flag
             unsetArmingDisabled(ARMING_DISABLED_BOOT_GRACE_TIME);
         }
-
-        // Clear the crash flip active status
-        flipOverAfterCrashActive = false;
 
         // If switch is used for arming then check it is not defaulting to on when the RX link recovers from a fault
         if (!isUsingSticksForArming()) {
@@ -283,7 +276,7 @@ void updateArmingStatus(void)
             unsetArmingDisabled(ARMING_DISABLED_THROTTLE);
         }
 
-        if (!isUpright() && !IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
+        if (!isUpright()) {
             setArmingDisabled(ARMING_DISABLED_ANGLE);
         } else {
             unsetArmingDisabled(ARMING_DISABLED_ANGLE);
@@ -398,12 +391,6 @@ void disarm(flightLogDisarmReason_e reason)
         DISABLE_ARMING_FLAG(ARMED);
         lastDisarmTimeUs = micros();
 
-#ifdef USE_OSD
-        if (flipOverAfterCrashActive) {
-            osdSuppressStats(true);
-        }
-#endif
-
 #ifdef USE_BLACKBOX
         flightLogEvent_disarm_t eventData;
         eventData.reason = reason;
@@ -416,12 +403,6 @@ void disarm(flightLogDisarmReason_e reason)
         UNUSED(reason);
 #endif
         BEEP_OFF;
-#ifdef USE_DSHOT
-        if (isMotorProtocolDshot() && flipOverAfterCrashActive) {
-            dshotCommandWrite(ALL_MOTORS, getMotorCount(), DSHOT_CMD_SPIN_DIRECTION_NORMAL, DSHOT_CMD_TYPE_INLINE);
-        }
-#endif
-        flipOverAfterCrashActive = false;
 
 #ifdef USE_PERSISTENT_STATS
         statsOnDisarm();
@@ -452,26 +433,9 @@ void tryArm(void)
 #ifdef USE_DSHOT
         if (currentTimeUs - getLastDshotBeaconCommandTimeUs() < DSHOT_BEACON_GUARD_DELAY_US) {
             if (tryingToArm == ARMING_DELAYED_DISARMED) {
-                if (IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
-                    tryingToArm = ARMING_DELAYED_CRASHFLIP;
-                } else {
-                    tryingToArm = ARMING_DELAYED_NORMAL;
-                }
+                tryingToArm = ARMING_DELAYED_NORMAL;
             }
             return;
-        }
-
-        if (isMotorProtocolDshot() && isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH)) {
-            if (!(IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH) || (tryingToArm == ARMING_DELAYED_CRASHFLIP))) {
-                flipOverAfterCrashActive = false;
-                dshotCommandWrite(ALL_MOTORS, getMotorCount(), DSHOT_CMD_SPIN_DIRECTION_NORMAL, DSHOT_CMD_TYPE_INLINE);
-            } else {
-                flipOverAfterCrashActive = true;
-#ifdef USE_RUNAWAY_TAKEOFF
-                runawayTakeoffCheckDisabled = false;
-#endif
-                dshotCommandWrite(ALL_MOTORS, getMotorCount(), DSHOT_CMD_SPIN_DIRECTION_REVERSED, DSHOT_CMD_TYPE_INLINE);
-            }
         }
 #endif
 
@@ -714,7 +678,6 @@ bool processRx(timeUs_t currentTimeUs)
     if (ARMING_FLAG(ARMED)
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
-        && !flipOverAfterCrashActive
         && !runawayTakeoffTemporarilyDisabled
         && !isFixedWing()) {
 
@@ -829,13 +792,6 @@ bool processRx(timeUs_t currentTimeUs)
     }
 
     updateActivatedModes();
-
-#ifdef USE_DSHOT
-    /* Enable beep warning when the crash flip mode is active */
-    if (flipOverAfterCrashActive) {
-        beeper(BEEPER_CRASH_FLIP_MODE);
-    }
-#endif
 
     if (!cliMode && !IS_RC_MODE_ACTIVE(BOXPARALYZE)) {
         processRcAdjustments(currentControlRateProfile);
@@ -972,7 +928,6 @@ static FAST_CODE void subTaskPidController(timeUs_t currentTimeUs)
         && !isFixedWing()
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
-        && !flipOverAfterCrashActive
         && !runawayTakeoffTemporarilyDisabled
         && !FLIGHT_MODE(GPS_RESCUE_MODE)   // disable Runaway Takeoff triggering if GPS Rescue is active
         && (!featureIsEnabled(FEATURE_MOTOR_STOP) || airmodeIsEnabled() || (calculateThrottleStatus() != THROTTLE_LOW))) {
@@ -1165,11 +1120,6 @@ FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
         DEBUG_SET(DEBUG_CYCLETIME, 0, getTaskDeltaTimeUs(TASK_SELF));
         DEBUG_SET(DEBUG_CYCLETIME, 1, getAverageSystemLoadPercent());
     }
-}
-
-bool isFlipOverAfterCrashActive(void)
-{
-    return flipOverAfterCrashActive;
 }
 
 timeUs_t getLastDisarmTimeUs(void)
