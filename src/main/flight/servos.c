@@ -557,3 +557,9 @@ static void filterServos(void)
 #endif
 }
 #endif // USE_SERVOS
+
+float servosGetSwashRingValue(void)
+{
+    return 1.0;
+}
+

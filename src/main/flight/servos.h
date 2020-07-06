@@ -149,3 +149,4 @@ void servoMixer(void);
 void servosTricopterInit(void);
 void servosTricopterMixer(void);
 bool servosTricopterIsEnabledServoUnarmed(void);
+float servosGetSwashRingValue(void);

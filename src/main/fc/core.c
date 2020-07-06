@@ -654,18 +654,9 @@ bool processRx(timeUs_t currentTimeUs)
         airmodeIsActivated = false;
     }
 
-    /* In airmode iterm should be prevented to grow when Low thottle and Roll + Pitch Centered.
-     This is needed to prevent iterm winding on the ground, but keep full stabilisation on 0 throttle while in air */
-    if (throttleStatus == THROTTLE_LOW && !airmodeIsActivated) {
-        pidSetItermReset(true);
-        if (currentPidProfile->pidAtMinThrottle)
-            pidStabilisationState(PID_STABILISATION_ON);
-        else
-            pidStabilisationState(PID_STABILISATION_OFF);
-    } else {
-        pidSetItermReset(false);
-        pidStabilisationState(PID_STABILISATION_ON);
-    }
+    // HF3D: Check this
+    pidSetItermReset(false);
+    pidStabilisationState(PID_STABILISATION_ON);
 
 #ifdef USE_RUNAWAY_TAKEOFF
     // If runaway_takeoff_prevention is enabled, accumulate the amount of time that throttle

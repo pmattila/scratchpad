@@ -832,6 +832,17 @@ const clivalue_t valueTable[] = {
 // PG_MIXER_CONFIG
     { "yaw_motors_reversed",        VAR_INT8   | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, yaw_motors_reversed) },
 
+    // HF3D: Governor settings
+    { "gov_max_headspeed",          VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 10000 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_max_headspeed) },
+    { "gov_gear_ratio",             VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 100, 3000 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_gear_ratio) },
+    // HF3D TODO:  Move these governor settings to profiles eventually
+    { "gov_p_gain",                 VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 500 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_p_gain) },
+    { "gov_i_gain",                 VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 500 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_i_gain) },
+    { "gov_cyclic_ff_gain",         VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 500 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_cyclic_ff_gain) },
+    { "gov_collective_ff_gain",     VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 500 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_collective_ff_gain) },
+    { "gov_collective_ff_impulse_gain",  VAR_UINT16 |  MASTER_VALUE, .config.minmaxUnsigned = { 0, 500 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, gov_collective_ff_impulse_gain) },
+    { "spoolup_time",           VAR_UINT8 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 15 }, PG_MIXER_CONFIG, offsetof(mixerConfig_t, spoolup_time) },
+
 // PG_MOTOR_3D_CONFIG
     { "3d_deadband_low",            VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { PWM_PULSE_MIN, PWM_RANGE_MIDDLE }, PG_MOTOR_3D_CONFIG, offsetof(flight3DConfig_t, deadband3d_low) },
     { "3d_deadband_high",           VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { PWM_RANGE_MIDDLE, PWM_PULSE_MAX }, PG_MOTOR_3D_CONFIG, offsetof(flight3DConfig_t, deadband3d_high) },
