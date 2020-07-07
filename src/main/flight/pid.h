@@ -176,6 +176,11 @@ typedef struct pidProfile_s {
     uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
     uint8_t piro_comp_factor;               // Flatt pirouette compensation
     
+    uint16_t elevator_filter_gain;          // Elevator stop de-bounce feedforward filter gain
+    uint8_t elevator_filter_window_time;    // Time in ms that we no longer apply de-bounce inside our window
+    uint8_t elevator_filter_window_size;    // Size of the de-bounce window around center stick (0 deg/s) in degrees/second
+    uint8_t elevator_filter_hz;             // Low-pass filter cutoff frequency that is applied to our elevator setpoint.  Lower Hz = more delay on stop.
+
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
