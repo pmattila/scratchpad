@@ -165,6 +165,8 @@ typedef struct pidProfile_s {
     uint16_t yawColPulseKf;                 // Feedforward for collective impulse into Yaw
     uint16_t yawCycKf;                      // Feedforward for cyclic into Yaw
     uint16_t yawBaseThrust;                 // Base thrust for the tail
+    uint8_t error_decay_always;             // Always decay accumulated I term and Abs Control error?
+    uint8_t error_decay_rate;               // Rate to decay accumulated error in deg/s
     uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
     
     uint16_t elevator_filter_gain;          // Elevator stop de-bounce feedforward filter gain
