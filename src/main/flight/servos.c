@@ -96,6 +96,8 @@ int16_t servo[MAX_SUPPORTED_SERVOS];
 static uint8_t servoRuleCount = 0;
 static servoMixer_t currentServoMixer[MAX_SERVO_RULES];
 static int useServo;
+int servo_override[MAX_SUPPORTED_SERVOS];
+int servo_input_override[5];
 
 #define COUNT_SERVO_RULES(rules) (sizeof(rules) / sizeof(servoMixer_t))
 // mixer rule format servo, input, rate, speed, min, max, box
@@ -219,6 +221,14 @@ int servoDirection(int servoIndex, int inputSource)
 
 void servosInit(void)
 {
+    // Reset servo position override
+    for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+        servo_override[i] = 2001;
+    }
+    for (int i = 0; i < 5; i++) {
+        servo_input_override[i] = 0;
+    }
+    
     // enable servos for mixes that require them. note, this shifts motor counts.
     useServo = mixers[getMixerMode()].useServo;
     // if we want camstab/trig, that also enables servos, even if mixer doesn't
@@ -464,6 +474,18 @@ void servoMixer(void)
     // NOTE:  pidSumLimit for roll & pitch should be increased until exactly 10 degrees of cyclic pitch is achieved at maximum swash deflection and zero collective pitch
     //   .... Actually, maybe the rates should be increased/decreased instead of pidSumLimit.  This would allow very similar gains to be used across different size helis as long as max cyclic pitch is similar.
     
+    // HF3D:  Override servo mixer inputs if user asks us to (via CLI or MSP/Configurator)
+    //   "servo_input_override ON" sets servo_input_override[4] to 1.  OFF sets it to 0.
+    //   "servo_input_override 0 50" sets collective input to 50 (inputs are generally on a -500 to +500 range)
+    //   NOTE:  The only limitations to these overrides are the servo max/min PWM!  Be careful!
+    if (!ARMING_FLAG(ARMED) && servo_input_override[4]) {
+        input[INPUT_RC_COLLECTIVE] = servo_input_override[0];
+        input[INPUT_STABILIZED_ROLL] = servo_input_override[1] * PID_SERVO_MIXER_SCALING;
+        input[INPUT_STABILIZED_PITCH] = servo_input_override[2] * PID_SERVO_MIXER_SCALING;
+        input[INPUT_STABILIZED_YAW] = servo_input_override[3];
+
+    }
+
     // mix servos according to smix rules
     //   https://github.com/cleanflight/cleanflight/blob/master/docs/Mixer.md
     for (int i = 0; i < servoRuleCount; i++) {
@@ -539,6 +561,18 @@ static void servoTable(void)
             } else {
                 servo[SERVO_GIMBAL_PITCH] += (int32_t)servoParams(SERVO_GIMBAL_PITCH)->rate * attitude.values.pitch / 50;
                 servo[SERVO_GIMBAL_ROLL] += (int32_t)servoParams(SERVO_GIMBAL_ROLL)->rate * attitude.values.roll  / 50;
+            }
+        }
+    }
+
+    // HF3D:  add offset to servo center position if user asks us to (via CLI or MSP/Configurator)
+    //  When combined with "servo_input_override on" this allows the user to determine servo centers for swashplate leveling
+    //  Recommend first turning on servo_input_override on, adjusting swash level, and then adjusting collective zero point
+    //  Then type "servo_position" to see the new servo output values.  Use the "servo" command to make these the new center point for each servo.
+    if (!ARMING_FLAG(ARMED)) {
+        for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+            if (servo_override[i] < 2000) {
+                servo[i] += servo_override[i];
             }
         }
     }
