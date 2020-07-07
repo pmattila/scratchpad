@@ -505,7 +505,7 @@ static void validateAndFixConfig(void)
     }
 
 #if defined(USE_DYN_IDLE)
-    if (!isRpmFilterEnabled()) {
+    if (!isRpmSourceActive()) {
         for (unsigned i = 0; i < PID_PROFILE_COUNT; i++) {
             pidProfilesMutable(i)->idle_min_rpm = 0;
         }
