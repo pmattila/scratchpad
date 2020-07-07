@@ -1074,7 +1074,11 @@ const clivalue_t valueTable[] = {
     { "error_decay_always",             VAR_UINT8  | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_always) },
     { "error_decay_rate",               VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 45 },PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_rate) },
     { "collective_ff_impulse_freq",     VAR_UINT16 | MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, collective_ff_impulse_freq) },
-    
+    { "elevator_filter_gain",           VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_gain) },
+    { "elevator_filter_window_time",    VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 255 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_window_time) },
+    { "elevator_filter_window_size",    VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_window_size) },
+    { "elevator_filter_hz",             VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_hz) },
+
 // PG_TELEMETRY_CONFIG
 #ifdef USE_TELEMETRY
     { "tlm_inverted",               VAR_UINT8  | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_TELEMETRY_CONFIG, offsetof(telemetryConfig_t, telemetry_inverted) },
