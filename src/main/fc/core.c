@@ -652,6 +652,10 @@ bool processRx(timeUs_t currentTimeUs)
         airmodeIsActivated = false;
     }
 
+    // HF3D: Check this
+    pidSetItermReset(false);
+    pidStabilisationState(PID_STABILISATION_ON);
+
 #ifdef USE_RUNAWAY_TAKEOFF
     // If runaway_takeoff_prevention is enabled, accumulate the amount of time that throttle
     // is above runaway_takeoff_deactivate_throttle with the any of the R/P/Y sticks deflected
