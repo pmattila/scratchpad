@@ -240,8 +240,14 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"motor",       6, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_7)},
     {"motor",       7, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_8)},
 
-    /* Tricopter tail servo */
-    {"servo",       5, UNSIGNED, .Ipredict = PREDICT(1500),    .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(TRICOPTER)}
+    /* Helicopter servos when using MIXER_CUSTOM_AIRPLANE */
+    // Ipredict set to Zero for now due to mix of 1500/760uS servos
+    {"servo",       2, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+    {"servo",       3, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+    {"servo",       4, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+    {"servo",       5, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+
+    {"headspeed",  -1, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
 };
 
 #ifdef USE_GPS
@@ -322,6 +328,7 @@ typedef struct blackboxMainState_s {
     int32_t surfaceRaw;
 #endif
     uint16_t rssi;
+    uint16_t headspeed;
 } blackboxMainState_t;
 
 typedef struct blackboxGpsState_s {
@@ -619,10 +626,14 @@ static void writeIntraframe(void)
         blackboxWriteSignedVB(blackboxCurrent->motor[x] - blackboxCurrent->motor[0]);
     }
 
-    if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_TRICOPTER)) {
-        //Assume the tail spends most of its time around the center
-        blackboxWriteSignedVB(blackboxCurrent->servo[5] - 1500);
-    }
+    // Write the servo I frames as unsigned since they will always be somewhere between 0 and 2020
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[2]);
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[3]);
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[4]);
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[5]);
+
+    // Write helicopter headspeed
+    blackboxWriteUnsignedVB(blackboxCurrent->headspeed);
 
     //Rotate our history buffers:
 
@@ -755,9 +766,15 @@ static void writeInterframe(void)
     }
     blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, motor),     getMotorCount());
 
-    if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_TRICOPTER)) {
-        blackboxWriteSignedVB(blackboxCurrent->servo[5] - blackboxLast->servo[5]);
+    // Calculate helicopter servo deltas from last BB frame and write as a group of 4 to this P interframe
+    for (int x = 0; x < 4; x++) {
+        // +2 for MIXER_CUSTOM_AIRPLANE used with custom smix
+        deltas[x] = blackboxCurrent->servo[x+2] - blackboxLast->servo[x+2];
     }
+    blackboxWriteTag8_4S16(deltas);
+
+    // Write helicopter headspeed with delta from last frame
+    blackboxWriteSignedVB(blackboxCurrent->headspeed - blackboxLast->headspeed);
 
     //Rotate our history buffers
     blackboxHistory[2] = blackboxHistory[1];
@@ -1074,9 +1091,13 @@ static void loadMainState(timeUs_t currentTimeUs)
     blackboxCurrent->rssi = getRssi();
 
 #ifdef USE_SERVOS
-    //Tail servo for tricopters
+    //Helicopter servos using MIXER_CUSTOM_AIRPLANE
+    blackboxCurrent->servo[2] = servo[2];
+    blackboxCurrent->servo[3] = servo[3];
+    blackboxCurrent->servo[4] = servo[4];
     blackboxCurrent->servo[5] = servo[5];
 #endif
+    blackboxCurrent->headspeed = getHeadSpeed();
 #else
     UNUSED(currentTimeUs);
 #endif // UNIT_TEST
