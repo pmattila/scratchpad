@@ -587,12 +587,24 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     } else {
         feedForwardTransition = 100.0f / pidProfile->feedForwardTransition;
     }
-    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
-        pidCoefficient[axis].Kp = PTERM_SCALE * pidProfile->pid[axis].P;
-        pidCoefficient[axis].Ki = ITERM_SCALE * pidProfile->pid[axis].I;
-        pidCoefficient[axis].Kd = DTERM_SCALE * pidProfile->pid[axis].D;
-        pidCoefficient[axis].Kf = FEEDFORWARD_SCALE * (pidProfile->pid[axis].F / 100.0f);
-    }
+
+    // Roll axis
+    pidCoefficient[FD_ROLL].Kp = PTERM_SCALE * pidProfile->pid[FD_ROLL].P / 10.0f;
+    pidCoefficient[FD_ROLL].Ki = ITERM_SCALE * pidProfile->pid[FD_ROLL].I / 5.0f;
+    pidCoefficient[FD_ROLL].Kd = DTERM_SCALE * pidProfile->pid[FD_ROLL].D / 10.0f;
+    pidCoefficient[FD_ROLL].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_ROLL].F / 100.0f;
+
+    // Pitch axis
+    pidCoefficient[FD_PITCH].Kp = PTERM_SCALE * pidProfile->pid[FD_PITCH].P / 10.0f;
+    pidCoefficient[FD_PITCH].Ki = ITERM_SCALE * pidProfile->pid[FD_PITCH].I /  5.0f;
+    pidCoefficient[FD_PITCH].Kd = DTERM_SCALE * pidProfile->pid[FD_PITCH].D / 10.0f;
+    pidCoefficient[FD_PITCH].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_PITCH].F / 100.0f;
+
+    // Yaw axis
+    pidCoefficient[FD_YAW].Kp = PTERM_SCALE * pidProfile->pid[FD_YAW].P;
+    pidCoefficient[FD_YAW].Ki = ITERM_SCALE * pidProfile->pid[FD_YAW].I;
+    pidCoefficient[FD_YAW].Kd = DTERM_SCALE * pidProfile->pid[FD_YAW].D;
+    pidCoefficient[FD_YAW].Kf = FEEDFORWARD_SCALE * pidProfile->pid[FD_YAW].F / 100.0f;
 
     levelGain = pidProfile->pid[PID_LEVEL].P / 10.0f;
     horizonGain = pidProfile->pid[PID_LEVEL].I / 10.0f;
