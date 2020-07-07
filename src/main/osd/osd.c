@@ -462,15 +462,14 @@ static int32_t getAverageEscRpm(void)
     if (motorConfig()->dev.useDshotTelemetry) {
         uint32_t rpm = 0;
         for (int i = 0; i < getMotorCount(); i++) {
-            rpm += getDshotTelemetry(i);
+            rpm += calcEscRpm(i,getDshotTelemetry(i));
         }
-        rpm = rpm / getMotorCount();
-        return rpm * 100 * 2 / motorConfig()->motorPoleCount;
+        return rpm / getMotorCount();
     }
 #endif
 #ifdef USE_ESC_SENSOR
     if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
-        return calcEscRpm(osdEscDataCombined->rpm);
+        return calcEscRpm(0, osdEscDataCombined->rpm);
     }
 #endif
     return 0;
