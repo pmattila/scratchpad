@@ -75,7 +75,7 @@ PG_RESET_TEMPLATE(mixerConfig_t, mixerConfig,
     .mixerMode = DEFAULT_MIXER,
     .yaw_motors_reversed = false,
     .gov_max_headspeed = 7000,
-    .gov_gear_ratio = 100,
+    .gov_gear_ratio = 1000,
     .gov_p_gain = 0,
     .gov_i_gain = 0,
     .gov_cyclic_ff_gain = 0,
@@ -413,7 +413,7 @@ void mixerInit(mixerMode_e mixerMode)
     //rampRate = pidGetDT() / (float)mixerConfig()->spoolup_time;
     // HF3D TODO:  lol... rampRate STILL not working.  Wtf.
     govMaxHeadspeed = mixerConfig()->gov_max_headspeed;     // stays uint16_t
-    govGearRatio = (float)mixerConfig()->gov_gear_ratio / 100.0f;
+    govGearRatio = (float)mixerConfig()->gov_gear_ratio / 1000.0f;
     govKp = (float)mixerConfig()->gov_p_gain / 10.0f;
     govKi = (float)mixerConfig()->gov_i_gain / 10.0f;
     govCycKf = (float)mixerConfig()->gov_cyclic_ff_gain / 100.0f;
@@ -624,7 +624,7 @@ static void applyMixToMotors(float motorMix[MAX_SUPPORTED_MOTORS], motorMixer_t 
     if (motorCount > 0) {
 
         // Calculate headspeed
-#ifdef USE_RPM_FILTER_TODO
+#ifdef USE_RPM_FILTER
         float mainMotorRPM = rpmGetFilteredMotorRPM(0);    // Get filtered main motor rpm from rpm_filter's source
 #else
         float mainMotorRPM = 0.0f;
@@ -739,13 +739,13 @@ static void applyMixToMotors(float motorMix[MAX_SUPPORTED_MOTORS], motorMixer_t 
         // If not spooled up and throttle is higher than our last spooled-up output, spool some more
         } else if (!governorSetpoint && !spooledUp && (lastSpoolThrottle < throttle)) {
             // Governor is disabled, running on throttle % only.
-            throttle = lastSpoolThrottle + govRampRate;    // govRampRate defined in mixerConfigureOutput up above
+            throttle = lastSpoolThrottle + govRampRate;
             lastSpoolThrottle = throttle;
 
         // If not spooled up and headspeed is lower than our governorSetpoint, spool some more
         } else if (governorSetpoint && !spooledUp && (headspeed < governorSetpoint)) {
             // Governor is enabled, running on headspeed.
-            throttle = lastSpoolThrottle + govRampRate;    // govRampRate defined in mixerConfigureOutput up above
+            throttle = lastSpoolThrottle + govRampRate;
             lastSpoolThrottle = throttle;
         
         }
@@ -1078,7 +1078,6 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensa
         && !airmodeEnabled
         && !FLIGHT_MODE(GPS_RESCUE_MODE)   // disable motor_stop while GPS Rescue is active
         && (rcData[THROTTLE] < rxConfig()->mincheck)) {
-        // motor_stop handling
         applyMotorStop();
     } else {
         // Apply the mix to motor endpoints

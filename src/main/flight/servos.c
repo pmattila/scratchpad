@@ -412,7 +412,7 @@ int32_t swashRingTotal = 0;
 // Generic servo mixing from Cleanflight using user-defined smix values for each servo
 void servoMixer(void)
 {
-    int16_t input[INPUT_SOURCE_COUNT]; // Range [-500:+500]
+    int16_t input[INPUT_SOURCE_COUNT];    // Range [-500:+500]
     static int16_t currentOutput[MAX_SERVO_RULES];
 
     if (FLIGHT_MODE(PASSTHRU_MODE)) {
