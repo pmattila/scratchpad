@@ -205,6 +205,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .yawColPulseKf = 300,
         .yawCycKf = 0,
         .yawBaseThrust = 900,
+        .rescue_collective = 200,
         .error_decay_always = 0,
         .error_decay_rate = 7,
         .collective_ff_impulse_freq = 100,
@@ -251,6 +252,7 @@ typedef union dtermLowpass_u {
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
 
 static FAST_RAM_ZERO_INIT float yawPiroSetpoint;
+static FAST_RAM_ZERO_INIT float rescueCollective;
 static FAST_RAM_ZERO_INIT float collectiveStickPercent;
 static FAST_RAM_ZERO_INIT float collectiveStickLPF;
 static FAST_RAM_ZERO_INIT float collectiveStickHPF;
@@ -705,6 +707,8 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 #endif
 
     levelRaceMode = pidProfile->level_race_mode;
+
+    rescueCollective = pidProfile->rescue_collective;
 }
 
 void pidInit(const pidProfile_t *pidProfile)
@@ -1242,6 +1246,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             FALLTHROUGH;
         case LEVEL_MODE_RP:
             if (axis == FD_YAW) {
+                // HF3D: Rescue TODO
                 break;
             }
             currentPidSetpoint = pidLevel(axis, pidProfile, angleTrim, currentPidSetpoint);
@@ -1381,7 +1386,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #endif
 
         // Only enable feedforward for rate mode (flightModeFlag=0 is acro/rate mode)
-        const float feedforwardGain = (flightModeFlags) ? 0.0f : pidCoefficient[axis].Kf;
+        // HF3D:  Changed this so horizon & angle modes have feedforward also
+        const float feedforwardGain = pidCoefficient[axis].Kf;
         static timeUs_t lastTimeEleOutsideWindow = 0;
         float eleOffset = 0.0f;
         
@@ -1614,6 +1620,11 @@ float pidGetCollectiveStickPercent()
 float pidGetCollectiveStickHPF()
 {
     return collectiveStickHPF;
+}
+
+uint16_t pidGetRescueCollectiveSetting()
+{
+    return rescueCollective;
 }
 
 float pidGetCollectivePulseFilterGain(void)
