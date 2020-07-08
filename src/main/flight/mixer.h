@@ -108,8 +108,6 @@ void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensation);
 void stopMotors(void);
 void writeMotors(void);
 
-bool mixerIsTricopter(void);
-
 void mixerSetThrottleAngleCorrection(int correctionValue);
 float mixerGetThrottle(void);
 mixerMode_e getMixerMode(void);
