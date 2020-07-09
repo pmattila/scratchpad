@@ -383,6 +383,7 @@ void mixerConfigureOutput(void)
         // load custom mixer into currentMixer
         for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
             // Check if done by seeing if this motor has any mixing
+            // HF3D:  Also allow for tail motors by checking if motor is assigned to Yaw channel OR Throttle channel
             if ((customMotorMixer(i)->throttle == 0.0f) && (customMotorMixer(i)->yaw == 0.0f)) {
                 break;
             }
@@ -972,6 +973,8 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensa
             scaledAxisPidPitch * activeMixer[i].pitch +
             scaledAxisPidYaw   * activeMixer[i].yaw;
 
+        // HF3D TODO:  VBatt compensation might actually be valid for a motor driven tail?
+        //   Other option is to use a governor to drive the tail motor to an exact RPM target instead of using a throttle setpoint
         mix *= vbatCompensationFactor;  // Add voltage compensation
 
         motorMix[i] = mix;
@@ -1027,6 +1030,24 @@ bool isFixedWing(void)
         break;
     }
 }
+
+// HF3D TODO:  Move this to governor/spoolup source file eventually
+//
+// Return the status of whether the heli is spooled up
+//
+// Very critical that this status is correct, because core.c checks it to
+// force the pid controller to reset it's I term on each pass if this is set.
+//
+// Spooled Up is reset to 0 if (mainMotorRPM < 1000.0f)
+//
+// spooledUp will set to "1" the first time if it's a "clean" spoolup
+// where you arm and spool to a single throttle setpoint.
+//
+// Jacking around with the throttle during spoolup could cause it to set
+// the spooledUp flag instantly if you're already above 1000rpm.
+//
+// If user spools up above 1000rpm, then lowers throttle below the last
+// spool target reached, the heli will be considered spooled up.
 
 uint8_t isHeliSpooledUp(void)
 {
