@@ -56,7 +56,6 @@
 #include "flight/imu.h"
 #include "flight/gps_rescue.h"
 #include "flight/mixer.h"
-#include "flight/mixer_tricopter.h"
 #include "flight/pid.h"
 #include "flight/rpm_filter.h"
 
@@ -323,13 +322,6 @@ bool areMotorsRunning(void)
     return motorsRunning;
 }
 
-#ifdef USE_SERVOS
-bool mixerIsTricopter(void)
-{
-    return (currentMixerMode == MIXER_TRI || currentMixerMode == MIXER_CUSTOM_TRI);
-}
-#endif
-
 // All PWM motor scaling is done to standard PWM range of 1000-2000 for easier tick conversion with legacy code / configurator
 // DSHOT scaling is done to the actual dshot range
 void initEscEndpoints(void)
@@ -370,11 +362,6 @@ void mixerInit(mixerMode_e mixerMode)
     currentMixerMode = mixerMode;
 
     initEscEndpoints();
-#ifdef USE_SERVOS
-    if (mixerIsTricopter()) {
-        mixerTricopterInit();
-    }
-#endif
 
 #ifdef USE_DYN_IDLE
     idleThrottleOffset = motorConfig()->digitalIdleOffsetValue * 0.0001f;
@@ -547,11 +534,6 @@ static void applyMixToMotors(float motorMix[MAX_SUPPORTED_MOTORS], motorMixer_t 
 #endif
         motorOutput = motorOutputMin + motorOutputRange * motorOutput;
 
-#ifdef USE_SERVOS
-        if (mixerIsTricopter()) {
-            motorOutput += mixerTricopterMotorCorrection(i);
-        }
-#endif
         if (failsafeIsActive()) {
 #ifdef USE_DSHOT
             if (isMotorProtocolDshot()) {
