@@ -240,6 +240,7 @@ typedef union dtermLowpass_u {
 
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
 
+static FAST_RAM_ZERO_INIT float yawPiroSetpoint;
 static FAST_RAM_ZERO_INIT float collectiveStickPercent;
 static FAST_RAM_ZERO_INIT float collectiveStickLPF;
 static FAST_RAM_ZERO_INIT float collectiveStickHPF;
@@ -493,6 +494,7 @@ static FAST_RAM_ZERO_INIT float itermWindupPointInv;
 static FAST_RAM_ZERO_INIT uint8_t horizonTiltExpertMode;
 static FAST_RAM_ZERO_INIT float itermLimit;
 static FAST_RAM_ZERO_INIT bool itermRotation;
+static FAST_RAM_ZERO_INIT float piroCompFactor;
 
 #ifdef USE_INTEGRATED_YAW_CONTROL
 static FAST_RAM_ZERO_INIT bool useIntegratedYaw;
@@ -582,6 +584,8 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     }
     itermLimit = pidProfile->itermLimit;
     itermRotation = pidProfile->iterm_rotation;
+
+    piroCompFactor = pidProfile->piro_comp_factor;
 
 #if defined(USE_ITERM_RELAX)
     itermRelax = pidProfile->iterm_relax;
@@ -1130,6 +1134,16 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         }
 #endif // USE_ACRO_TRAINER
 
+        // HF3D: Flat pirouette compensation
+        //  Compensate for the fact that the main shaft axis is not aligned with the Z axis due to the roll tilt required to compensate for tail blade thrust
+        //  Create a wobble of the main shaft axis around the Z axis by adding roll and pitch commands proportional to the yaw rotation rate
+        if (axis == FD_ROLL && piroCompFactor > 1.0f) {
+            // HF3D TODO: Change roll compensation sign based on main motor rotation direction (tail thrust direction)
+            currentPidSetpoint += fabsf(yawPiroSetpoint) / piroCompFactor;   // Roll compensation direction is same regardless of yaw direction
+        } else if (axis == FD_PITCH && piroCompFactor > 1.0f) {
+            currentPidSetpoint += yawPiroSetpoint / piroCompFactor;          // Pitch compensation direction depends on yaw direction
+        }
+
         // -----calculate error rate
         const float gyroRate = gyro.gyroADCf[axis]; // Process variable from gyro output in deg/sec
         float errorRate = currentPidSetpoint - gyroRate; // r - y
@@ -1148,6 +1162,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #ifdef USE_ABSOLUTE_CONTROL
         float setpointCorrection = currentPidSetpoint - uncorrectedSetpoint;
 #endif
+
+        // HF3D:  After all setpoint changes are done, get Yaw setpoint for flat pirouette compensation
+        if (axis == FD_YAW) {
+            yawPiroSetpoint = currentPidSetpoint;
+        }
 
         // --------low-level gyro-based PID based on 2DOF PID controller. ----------
         // 2-DOF PID controller with optional filter on derivative term.
