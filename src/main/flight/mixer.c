@@ -87,7 +87,6 @@ float motor_disarmed[MAX_SUPPORTED_MOTORS];
 mixerMode_e currentMixerMode;
 static motorMixer_t currentMixer[MAX_SUPPORTED_MOTORS];
 
-static FAST_RAM_ZERO_INIT int throttleAngleCorrection;
 
 static const motorMixer_t mixerQuadX[] = {
     { 1.0f, -1.0f,  1.0f, -1.0f },          // REAR_R
@@ -441,7 +440,7 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
     float currentThrottleInputRange = 0;
 
     {
-        throttle = rcCommand[THROTTLE] - PWM_RANGE_MIN + throttleAngleCorrection;
+        throttle = rcCommand[THROTTLE] - PWM_RANGE_MIN;
         float appliedMotorOutputLow = motorOutputLow;
         motorRangeMax = motorOutputHigh;
 
@@ -619,11 +618,6 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensa
         // Apply the mix to motor endpoints
         applyMixToMotors(motorMix, activeMixer);
     }
-}
-
-void mixerSetThrottleAngleCorrection(int correctionValue)
-{
-    throttleAngleCorrection = correctionValue;
 }
 
 float mixerGetThrottle(void)
