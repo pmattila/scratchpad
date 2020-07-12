@@ -977,6 +977,13 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
         if (isHeliSpooledUp()) {
             // Integrate the angle rate error, which gives us the accumulated angle error for this axis
             //  Limit the total angle error to the range defined by pidProfile->abs_control_error_limit
+            if (axis == FD_ROLL || axis == FD_PITCH) {
+                // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+                // HF3D: TODO should use pidProfile->pidSumLimit
+                if (fabsf(pidData[axis].Sum) >= PIDSUM_LIMIT) {
+                    acErrorRate = 0;
+                }
+            }
             axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT,
                 -acErrorLimit, acErrorLimit);
             // Apply a proportional gain (abs_control_gain) to get a desired amount of correction
@@ -1214,6 +1221,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // -----calculate I component
         float Ki = pidCoefficient[axis].Ki;
+        if (axis == FD_ROLL || axis == FD_PITCH) {
+            // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+            if (fabsf(pidData[axis].Sum) >= pidProfile->pidSumLimit) {
+                Ki = 0;
+            }
+        }
         pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
 
         // Decay accumulated error if appropriate
