@@ -231,10 +231,6 @@ void servosInit(void)
     for (uint8_t i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         servo[i] = DEFAULT_SERVO_MIDDLE;
     }
-
-    if (mixerIsTricopter()) {
-        servosTricopterInit();
-    }
 }
 
 void loadCustomServoMixer(void)
@@ -329,10 +325,6 @@ void writeServos(void)
     switch (getMixerMode()) {
     case MIXER_TRI:
     case MIXER_CUSTOM_TRI:
-        // We move servo if unarmed flag set or armed
-        if (!(servosTricopterIsEnabledServoUnarmed() || ARMING_FLAG(ARMED))) {
-            servo[SERVO_RUDDER] = 0; // kill servo signal completely.
-        }
         writeServoWithTracking(servoIndex++, SERVO_RUDDER);
         break;
 
@@ -477,8 +469,6 @@ static void servoTable(void)
     switch (getMixerMode()) {
     case MIXER_CUSTOM_TRI:
     case MIXER_TRI:
-        servosTricopterMixer();
-        break;
     case MIXER_CUSTOM_AIRPLANE:
     case MIXER_FLYING_WING:
     case MIXER_AIRPLANE:
