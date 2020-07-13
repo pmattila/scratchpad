@@ -1,26 +1,33 @@
+
+## Heliflight 3D
+
+Heliflight 3D is flight controller software (firmware) used to fly single-rotor helicopters.
+
+This fork differs from Baseflight and Cleanflight in that it focuses on 3D flight performance for helicopters. Heliflight 3D was forked from Betaflight 4.2.
+
+## Important Notice: During the initial development period, Heliflight 3D is *NOT* optimized for slower hardware.  It is highly suggested to use a STM32F7 based flight controller.
+
+
+### Installation for End-Users:
+
+Please see the "Releases" page on this Github repo to download the latest official release for your FC board:
+* [Click here to go to Releases](https://github.com/heliflight3d/heliflight/releases)
+
+Please ignore any snapshots on this page (github is showing them automatically).
+
+### Installation for Beta-testers:
+
+Please see the "Actions" tab on this Github repo to download the latest build snapshot for your FC board:
+* [Click here to go to the Actions tab](https://github.com/heliflight3d/heliflight/actions)
+
+Please note that build snapshots are available for beta-testing, and are otherwise _not_ supported.
+
+
+## Betaflight News
+
 ![Important Notice: Support for STM32F3 based flight controllers was dropped in Betaflight 4.1. (This includes all boards with 'F3' in the name.)](docs/assets/images/stm32f3_retirement_notice.svg)
 
-(Please see the [note](#end-of-active-development-for-stm32f3-based-flight-controllers) below.)
-
-
-![Betaflight](docs/assets/images/bf_logo.png)
-
-[![Build Status](https://travis-ci.com/betaflight/betaflight.svg?branch=master)](https://travis-ci.com/betaflight/betaflight)
-
-Betaflight is flight controller software (firmware) used to fly multi-rotor craft and fixed wing craft.
-
-This fork differs from Baseflight and Cleanflight in that it focuses on flight performance, leading-edge feature additions, and wide target support.
-
-## Events
-
-| Date  | Event |
-| - | - |
-| 25 March 2020 | Deadline for pull request submission into 4.2 |
-| 1 April 2020 | Start of feature freeze / Release Candidate window for Betaflight 4.2 |
-| 1 May 2020 | Planned [release](https://github.com/betaflight/betaflight/milestone/38) date for Betaflight 4.2 |
-
-
-## News
+(Please see the [note](https://github.com/betaflight/betaflight#end-of-active-development-for-stm32f3-based-flight-controllers) below.)
 
 ### Requirements for the submission of new and updated targets
 
