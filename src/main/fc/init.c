@@ -812,6 +812,8 @@ void init(void)
     }
 #endif
 
+    mixerRpmSourceInit();
+
 #ifdef USE_USB_DETECT
     usbCableDetectInit();
 #endif
