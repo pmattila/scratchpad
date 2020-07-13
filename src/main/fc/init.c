@@ -727,6 +727,12 @@ void init(void)
 
     pidInit(currentPidProfile);
 
+#ifdef USE_RPM_FILTER
+    if (featureIsEnabled(FEATURE_RPM_FILTER)) {
+        rpmFilterInit(rpmFilterConfig());
+    }
+#endif
+
 #ifdef USE_PID_AUDIO
     pidAudioInit();
 #endif
