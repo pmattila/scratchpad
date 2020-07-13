@@ -739,6 +739,25 @@ float mixerGetThrottle(void)
     return mixerThrottle;
 }
 
+
+// HF3D TODO:  Move this to governor/spoolup source file eventually
+//
+// Return the status of whether the heli is spooled up
+//
+// Very critical that this status is correct, because core.c checks it to
+// force the pid controller to reset it's I term on each pass if this is set.
+//
+// Spooled Up is reset to 0 if (mainMotorRPM < 1000.0f)
+//
+// spooledUp will set to "1" the first time if it's a "clean" spoolup
+// where you arm and spool to a single throttle setpoint.
+//
+// Jacking around with the throttle during spoolup could cause it to set
+// the spooledUp flag instantly if you're already above 1000rpm.
+//
+// If user spools up above 1000rpm, then lowers throttle below the last
+// spool target reached, the heli will be considered spooled up.
+
 uint8_t isHeliSpooledUp(void)
 {
     return spooledUp;
