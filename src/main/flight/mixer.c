@@ -126,6 +126,7 @@ static void mixerUpdateInputs(void)
     mixInput[MIXER_IN_RC_COMMAND_ROLL]        = rcCommand[ROLL]       * MIXER_RC_SCALING;
     mixInput[MIXER_IN_RC_COMMAND_PITCH]       = rcCommand[PITCH]      * MIXER_RC_SCALING;
     mixInput[MIXER_IN_RC_COMMAND_YAW]         = rcCommand[YAW]        * MIXER_RC_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_COLLECTIVE]  = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
 
     mixInput[MIXER_IN_RC_COMMAND_THROTTLE]    = (rcCommand[THROTTLE] - MIXER_THR_OFFSET) * MIXER_THR_SCALING;
 
@@ -135,6 +136,9 @@ static void mixerUpdateInputs(void)
     mixInput[MIXER_IN_STABILIZED_ROLL]        = pidData[FD_ROLL].Sum  * MIXER_PID_SCALING;
     mixInput[MIXER_IN_STABILIZED_PITCH]       = pidData[FD_PITCH].Sum * MIXER_PID_SCALING;
     mixInput[MIXER_IN_STABILIZED_YAW]         = pidData[FD_YAW].Sum   * MIXER_PID_SCALING;
+
+    // TODO
+    mixInput[MIXER_IN_STABILIZED_COLLECTIVE]  = mixInput[MIXER_IN_RC_COMMAND_COLLECTIVE];
 
     // Cyclic deflection
     cyclicTotal = sqrtf(mixInput[MIXER_IN_STABILIZED_ROLL] * mixInput[MIXER_IN_STABILIZED_ROLL] +
