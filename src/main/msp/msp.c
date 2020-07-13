@@ -66,6 +66,7 @@
 #include "drivers/usb_msc.h"
 #include "drivers/vtx_common.h"
 #include "drivers/vtx_table.h"
+#include "drivers/freq.h"
 
 #include "fc/board_info.h"
 #include "fc/controlrate_profile.h"
@@ -1131,10 +1132,19 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
             }
 #endif
 
+#ifdef USE_FREQ_SENSOR
+            if (featureIsEnabled(FEATURE_FREQ_SENSOR)) {
+                if (!rpmDataAvailable) {
+                    rpm = calcMotorRPM(i, getFreqSensorRPM(i));
+                    rpmDataAvailable = true;
+                }
+            }
+#endif
+
 #ifdef USE_ESC_SENSOR
             if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
                 escSensorData_t *escData = getEscSensorData(i);
-                if (!rpmDataAvailable) {  // We want DSHOT telemetry RPM data (if available) to have precedence
+                if (!rpmDataAvailable) {
                     rpm = calcMotorRPM(i,escData->rpm);
                     rpmDataAvailable = true;
                 }
@@ -1145,7 +1155,7 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
             }
 #endif
 
-            sbufWriteU32(dst, (rpmDataAvailable ? rpm : 0));
+            sbufWriteU32(dst, rpm);
             sbufWriteU16(dst, invalidPct);
             sbufWriteU8(dst, escTemperature);
             sbufWriteU16(dst, escVoltage);
