@@ -270,7 +270,7 @@ static const char * const featureNames[] = {
     [27] = "ESC_SENSOR",
     [28] = "FREQ_SENSOR",
     [29] = "DYNAMIC_FILTER",
-    [30] = "",
+    [30] = "RPM_FILTER",
     [31] = NULL
 };
 
