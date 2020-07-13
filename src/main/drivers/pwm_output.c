@@ -304,7 +304,7 @@ void servoDevInit(const servoDevConfig_t *servoConfig)
         const timerHardware_t *timer = timerAllocate(tag, OWNER_SERVO, RESOURCE_INDEX(servoIndex));
 
         if (timer == NULL) {
-            /* flag failure and disable ability to arm */
+            // TODO:  flag failure and disable ability to arm?
             break;
         }
 
