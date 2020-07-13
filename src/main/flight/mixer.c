@@ -113,7 +113,7 @@ void mixerUpdate(void)
     mixerInput[MIXER_IN_RCCMD_ROLL]       = rcCommand[ROLL]       * MIXER_RC_SCALING;
     mixerInput[MIXER_IN_RCCMD_PITCH]      = rcCommand[PITCH]      * MIXER_RC_SCALING;
     mixerInput[MIXER_IN_RCCMD_YAW]        = rcCommand[YAW]        * MIXER_RC_SCALING;
-    //mixerInput[MIXER_IN_RCCMD_COLLECTIVE] = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
+    mixerInput[MIXER_IN_RCCMD_COLLECTIVE] = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
 
     mixerInput[MIXER_IN_RCCMD_THROTTLE]   = (rcCommand[THROTTLE] - MIXER_THR_OFFSET) * MIXER_THR_SCALING;
 
