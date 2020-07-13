@@ -184,6 +184,8 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .yawColPulseKf = 300,
         .yawCycKf = 0,
         .yawBaseThrust = 900,
+        .error_decay_always = 0,
+        .error_decay_rate = 7,
         .collective_ff_impulse_freq = 100,
     );
 }
@@ -1182,6 +1184,17 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // -----calculate I component
         float Ki = pidCoefficient[axis].Ki;
         pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
+
+        // Decay accumulated error if appropriate
+#define signorzero(x) ((x < 0) ? -1 : (x > 0) ? 1 : 0)
+        if (!isHeliSpooledUp() || pidProfile->error_decay_always) {
+            // Calculate number of degrees to remove from the accumulated error
+            const float decayFactor = pidProfile->error_decay_rate * dT;
+            pidData[axis].I -= signorzero(pidData[axis].I) * decayFactor * Ki;
+#if defined(USE_ABSOLUTE_CONTROL)
+            axisError[axis] -= signorzero(axisError[axis]) * decayFactor;
+#endif
+        }
 
         // -----calculate pidSetpointDelta
         float pidSetpointDelta = 0;
