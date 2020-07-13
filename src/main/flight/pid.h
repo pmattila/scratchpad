@@ -35,14 +35,21 @@
 #define PIDSUM_LIMIT_MIN            100
 #define PIDSUM_LIMIT_MAX            1000
 
-// Scaling factors for Pids for better tunable range in configurator for betaflight pid controller. The scaling is based on legacy pid controller or previous float
-#define PTERM_SCALE 0.032029f
-#define ITERM_SCALE 0.244381f
-#define DTERM_SCALE 0.000529f
+// Scaling factors for PIDs for better tunable range in configurator.
+#define ROLL_PTERM_SCALE	    (1.0f / 300)
+#define ROLL_ITERM_SCALE	    (1.0f / 20)
+#define ROLL_DTERM_SCALE	    (1.0f / 20000)
+#define PITCH_PTERM_SCALE	    (1.0f / 300)
+#define PITCH_ITERM_SCALE	    (1.0f / 20)
+#define PITCH_DTERM_SCALE	    (1.0f / 20000)
+#define YAW_PTERM_SCALE 	    (1.0f / 30)
+#define YAW_ITERM_SCALE 	    (1.0f / 4)
+#define YAW_DTERM_SCALE 	    (1.0f / 200)
 
 // The constant scale factor to replace the Kd component of the feedforward calculation.
-// This value gives the same "feel" as the previous Kd default of 26 (26 * DTERM_SCALE)
-#define FEEDFORWARD_SCALE 0.013754f
+#define ROLL_FF_SCALE               (1.0f / 7250)
+#define PITCH_FF_SCALE              (1.0f / 7250)
+#define YAW_FF_SCALE                (1.0f / 7250)
 
 // Full iterm suppression in setpoint mode at high-passed setpoint rate > 40deg/sec
 #define ITERM_RELAX_SETPOINT_THRESHOLD 40.0f
