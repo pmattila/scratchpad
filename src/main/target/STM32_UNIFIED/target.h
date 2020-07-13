@@ -240,6 +240,8 @@
 
 #define USE_ADC
 
+#define USE_FREQ_SENSOR
+
 #define USE_CUSTOM_DEFAULTS
 
 #if 0
