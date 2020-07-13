@@ -1760,7 +1760,8 @@ static void printMotorMix(dumpFlags_t dumpMask, const motorMixer_t *customMotorM
     char buf2[FTOA_BUFFER_LENGTH];
     char buf3[FTOA_BUFFER_LENGTH];
     for (uint32_t i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        if (customMotorMixer[i].throttle == 0.0f)
+        // HF3D: Allow for tail motor control with throttle = 0.0f by checking Yaw channel mix as well as throttle
+        if ((customMotorMixer[i].throttle == 0.0f) && (customMotorMixer[i].yaw == 0.0f))
             break;
         const float thr = customMotorMixer[i].throttle;
         const float roll = customMotorMixer[i].roll;
@@ -1807,6 +1808,7 @@ static void cliMotorMix(const char *cmdName, char *cmdline)
         // erase custom mixer
         for (uint32_t i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
             customMotorMixerMutable(i)->throttle = 0.0f;
+            customMotorMixerMutable(i)->yaw = 0.0f;
         }
     } else if (strncasecmp(cmdline, "load", 4) == 0) {
         ptr = nextArg(cmdline);
@@ -5683,7 +5685,9 @@ static void printConfig(const char *cmdName, char *cmdline, bool doDiff)
             cliDefaultPrintLinef(dumpMask, equalsDefault, formatMixer, mixerNames[mixerConfig()->mixerMode - 1]);
             cliDumpPrintLinef(dumpMask, equalsDefault, formatMixer, mixerNames[mixerConfig_Copy.mixerMode - 1]);
 
-            cliDumpPrintLinef(dumpMask, customMotorMixer(0)->throttle == 0.0f, "\r\nmmix reset\r\n");
+            // HF3D: Changed to allow for yaw term only on tail motor mix, although main motor should probably always be the first motor?
+            cliDumpPrintLinef(dumpMask, ((customMotorMixer(0)->throttle == 0.0f) &&
+                                         (customMotorMixer(0)->yaw == 0.0f)), "\r\nmmix reset\r\n");
 
             printMotorMix(dumpMask, customMotorMixer_CopyArray, customMotorMixer(0), mixerHeadingStr);
 
