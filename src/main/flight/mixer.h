@@ -29,6 +29,13 @@
 
 #define QUAD_MOTOR_COUNT 4
 
+typedef enum {
+    RPM_SRC_NONE = 0,
+    RPM_SRC_DSHOT_TELEM,
+    RPM_SRC_FREQ_SENSOR,
+    RPM_SRC_ESC_SENSOR,
+} rpmSource_e;
+
 // Note: this is called MultiType/MULTITYPE_* in baseflight.
 typedef enum mixerMode
 {
@@ -82,6 +89,7 @@ typedef struct mixerConfig_s {
     bool yaw_motors_reversed;
     uint16_t gov_max_headspeed;
     uint16_t gov_gear_ratio;
+    uint16_t gov_rpm_lpf;
     uint16_t gov_p_gain;
     uint16_t gov_i_gain;
     uint16_t gov_cyclic_ff_gain;
@@ -108,6 +116,7 @@ void mixerLoadMix(int index, motorMixer_t *customMixers);
 void initEscEndpoints(void);
 void mixerInit(mixerMode_e mixerMode);
 void mixerInitProfile(void);
+void mixerRpmSourceInit(void);
 
 void mixerConfigureOutput(void);
 
@@ -123,5 +132,11 @@ bool isFixedWing(void);
 uint8_t isHeliSpooledUp(void);
 float mixerGetGovGearRatio(void);
 float mixerGetGovCollectivePulseFilterGain(void);
-float mixerGetHeadSpeed(void);
 
+float getHeadSpeed(void);
+
+int calcMotorRpm(uint8_t motor, int erpm);
+int getMotorRPM(uint8_t motor);
+int getMotorRawRPM(uint8_t motor);
+
+bool isRpmSourceActive(void);
