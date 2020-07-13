@@ -76,13 +76,6 @@ static float rcCommandYawDivider = 500.0f;
 FAST_RAM_ZERO_INIT uint8_t interpolationChannels;
 static FAST_RAM_ZERO_INIT uint32_t rcFrameNumber;
 
-enum {
-    ROLL_FLAG = 1 << ROLL,
-    PITCH_FLAG = 1 << PITCH,
-    YAW_FLAG = 1 << YAW,
-    THROTTLE_FLAG = 1 << THROTTLE,
-};
-
 #ifdef USE_RC_SMOOTHING_FILTER
 #define RC_SMOOTHING_IDENTITY_FREQUENCY         80    // Used in the formula to convert a BIQUAD cutoff frequency to PT1
 #define RC_SMOOTHING_FILTER_STARTUP_DELAY_MS    5000  // Time to wait after power to let the PID loop stabilize before starting average frame rate calculation
@@ -254,8 +247,8 @@ static void calculateSetpointRate(int axis)
 
 static FAST_CODE uint8_t processRcInterpolation(void)
 {
-    static FAST_RAM_ZERO_INIT float rcCommandInterp[4];
-    static FAST_RAM_ZERO_INIT float rcStepSize[4];
+    static FAST_RAM_ZERO_INIT float rcCommandInterp[5];
+    static FAST_RAM_ZERO_INIT float rcStepSize[5];
     static FAST_RAM_ZERO_INIT int16_t rcInterpolationStepCount;
 
     uint16_t rxRefreshRate;
@@ -457,7 +450,7 @@ FAST_CODE_NOINLINE bool rcSmoothingAutoCalculate(void)
 static FAST_CODE uint8_t processRcSmoothingFilter(void)
 {
     uint8_t updatedChannel = 0;
-    static FAST_RAM_ZERO_INIT float lastRxData[4];
+    static FAST_RAM_ZERO_INIT float lastRxData[5];
     static FAST_RAM_ZERO_INIT bool initialized;
     static FAST_RAM_ZERO_INIT timeMs_t validRxFrameTimeMs;
     static FAST_RAM_ZERO_INIT bool calculateCutoffs;
@@ -700,6 +693,8 @@ FAST_CODE_NOINLINE void updateRcCommands(void)
     }
 
     rcCommand[THROTTLE] = constrain(rcData[THROTTLE], PWM_RANGE_MIN, PWM_RANGE_MAX);
+
+    rcCommand[COLLECTIVE] = constrain(rcData[COLLECTIVE] - rxConfig()->midrc, -500, 500);
 }
 
 void resetYawAxis(void)
@@ -742,29 +737,7 @@ void initRcProcessing(void)
         break;
     }
 
-    interpolationChannels = 0;
-    switch (rxConfig()->rcInterpolationChannels) {
-    case INTERPOLATION_CHANNELS_RPYT:
-        interpolationChannels |= THROTTLE_FLAG;
-
-        FALLTHROUGH;
-    case INTERPOLATION_CHANNELS_RPY:
-        interpolationChannels |= YAW_FLAG;
-
-        FALLTHROUGH;
-    case INTERPOLATION_CHANNELS_RP:
-        interpolationChannels |= ROLL_FLAG | PITCH_FLAG;
-
-        break;
-    case INTERPOLATION_CHANNELS_RPT:
-        interpolationChannels |= ROLL_FLAG | PITCH_FLAG;
-
-        FALLTHROUGH;
-    case INTERPOLATION_CHANNELS_T:
-        interpolationChannels |= THROTTLE_FLAG;
-
-        break;
-    }
+    interpolationChannels = rxConfig()->rcInterpolationChannels;
 }
 
 bool rcSmoothingIsEnabled(void)
