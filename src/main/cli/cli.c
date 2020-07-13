@@ -3079,6 +3079,21 @@ static int parseOutputIndex(const char *cmdName, char *pch, bool allowAllEscs) {
     return outputIndex;
 }
 
+static int parseServoOverrideIndex(const char *cmdName, char *pch, bool allowAllServos) {
+    int outputIndex = atoi(pch);
+    if ((outputIndex >= 0) && (outputIndex < MAX_SUPPORTED_SERVOS)) {
+        cliPrintLinef("Using servo output %d.", outputIndex);
+    } else if (allowAllServos && outputIndex == ALL_MOTORS) {
+        cliPrintLinef("Using all servo outputs.");
+    } else {
+        cliPrintErrorLinef(cmdName, "INVALID SERVO NUMBER. RANGE: 0 - %d.", MAX_SUPPORTED_SERVOS - 1);
+
+        return -1;
+    }
+
+    return outputIndex;
+}
+
 #if defined(USE_DSHOT)
 #if defined(USE_ESC_SENSOR) && defined(USE_ESC_SENSOR_INFO)
 
@@ -3470,6 +3485,138 @@ static void cliMotor(const char *cmdName, char *cmdline)
         cliShowInvalidArgumentCountError(cmdName);
     }
 }
+
+static void cliServoPosition(const char *cmdName, char *cmdline)
+{
+    if (isEmpty(cmdline)) {
+        // Print out the current servo position outputs if no parameters given
+        cliPrintLinef("Status of all servo positions:");
+        for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+            cliPrintLinef("  Current output for Servo %d: %d", i, servo[i]);
+        }
+        //cliShowParseError();
+
+        return;
+    }
+
+    int servoIndex = 0;
+    int servoValue = -2000;
+
+    char *saveptr;
+    char *pch = strtok_r(cmdline, " ", &saveptr);
+    int index = 0;
+    while (pch != NULL) {
+        switch (index) {
+        case 0:
+            servoIndex = parseServoOverrideIndex(cmdName, pch, true);
+            if (servoIndex == -1) {
+                return;
+            }
+
+            break;
+        case 1:
+            servoValue = atoi(pch);
+
+            break;
+        }
+        index++;
+        pch = strtok_r(NULL, " ", &saveptr);
+    }
+
+    if (index == 2) {
+        if (servoValue < -1000 || servoValue > 2001) {
+            cliShowArgumentRangeError(cmdName, "VALUE", -1000, 2001);
+        } else {
+            int servoOutputValue = servoValue;
+
+            if (servoIndex != ALL_MOTORS) {
+                servo_override[servoIndex] = servoOutputValue;
+
+                cliPrintLinef("servo %d override set to: %d", servoIndex, servoOutputValue);
+            } else  {
+                for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+                    servo_override[i] = servoOutputValue;
+                }
+
+                cliPrintLinef("all servos override set to: %d", servoOutputValue);
+            }
+        }
+    } else {
+        // Print out the current servo override setting if no position given (255 = all servos print)
+        if (servoIndex != ALL_MOTORS) {
+            cliPrintLinef("Servo override setting for servo %d: %d", servoIndex, servo_override[servoIndex]);
+        } else  {
+            for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+                cliPrintLinef("Servo override setting for servo %d: %d", i, servo_override[i]);
+            }
+        }
+        //cliShowParseError();
+    }
+}
+
+static void cliServoInputOverride(const char *cmdName, char *cmdline)
+{
+    if (isEmpty(cmdline)) {
+        if (servo_input_override[4]) {
+            cliPrintLinef("Servo input override is on.");
+            cliPrintLinef(" Collective input (0) override value: %d", servo_input_override[0]);
+            cliPrintLinef(" Roll input (1) override value: %d", servo_input_override[1]);
+            cliPrintLinef(" Pitch input (2) override value: %d", servo_input_override[2]);
+            cliPrintLinef(" Yaw input (3) override value: %d", servo_input_override[3]);
+        } else {
+            cliPrintLinef("Servo input override is off.");
+        }
+        return;
+    }
+
+    int inputIndex = 0;
+    int overrideValue = 0;
+
+    char *saveptr;
+    char *pch = strtok_r(cmdline, " ", &saveptr);
+    int index = 0;
+    while (pch != NULL) {
+        switch (index) {
+        case 0:
+            if (strcasestr(pch, "on")) {
+                servo_input_override[4] = 1;
+                return;
+            } else if (strcasestr(pch, "off")) {
+                servo_input_override[4] = 0;
+                return;
+            }
+
+            inputIndex = atoi(pch);
+            if ((inputIndex >= 0) && (inputIndex <= 3)) {
+                cliPrintLinef("Setting servo input override for %d.", inputIndex);
+            } else {
+                cliPrintErrorLinef(cmdName, "INVALID SERVO INPUT CHANNEL. RANGE: 0 - 3.");
+                return;
+            }
+            break;
+
+        case 1:
+            overrideValue = atoi(pch);
+            break;
+        }
+        index++;
+        pch = strtok_r(NULL, " ", &saveptr);
+    }
+
+    if (index == 2) {
+        if (overrideValue < -1000 || overrideValue > 1000) {
+            cliShowArgumentRangeError(cmdName, "VALUE", -1000, 1000);
+        } else {
+            servo_input_override[inputIndex] = overrideValue;
+            cliPrintLinef("input override value for input %d set to: %d", inputIndex, overrideValue);
+        }
+    } else {
+        // Print out the current input override setting if no position given (255 = all servos print)
+        cliPrintLinef("input override value for input %d: %d", inputIndex, servo_input_override[inputIndex]);
+        //cliShowParseError();
+    }
+}
+
 
 #ifndef MINIMAL_CLI
 static void cliPlaySound(const char *cmdName, char *cmdline)
@@ -5890,6 +6037,8 @@ const clicmd_t cmdTable[] = {
 #endif
 #ifdef USE_SERVOS
     CLI_COMMAND_DEF("servo", "configure servos", NULL, cliServo),
+    CLI_COMMAND_DEF("servo_position",  "get servo positions/set servo position offsets", "<index> [<value>]", cliServoPosition),
+    CLI_COMMAND_DEF("servo_input_override",  "get/set servo input overrides (collective/roll/pitch/yaw)", "<index> [<value>]", cliServoInputOverride),
 #endif
     CLI_COMMAND_DEF("set", "change setting", "[<name>=<value>]", cliSet),
 #if defined(USE_SIGNATURE)
