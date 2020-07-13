@@ -146,3 +146,4 @@ void servoConfigureOutput(void);
 void servosInit(void);
 void servosFilterInit(void);
 void servoMixer(void);
+float servosGetCyclicDeflection(void);
