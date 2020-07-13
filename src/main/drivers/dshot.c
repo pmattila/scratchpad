@@ -52,7 +52,7 @@
 void dshotInitEndpoints(const motorConfig_t *motorConfig, float outputLimit, float *outputLow, float *outputHigh, float *disarm, float *deadbandMotor3dHigh, float *deadbandMotor3dLow) {
     float outputLimitOffset = (DSHOT_MAX_THROTTLE - DSHOT_MIN_THROTTLE) * (1 - outputLimit);
     *disarm = DSHOT_CMD_MOTOR_STOP;
-    if (featureIsEnabled(FEATURE_3D)) {
+    if (false) { // HF3D: FEATURE_3D
         *outputLow = DSHOT_MIN_THROTTLE + ((DSHOT_3D_FORWARD_MIN_THROTTLE - 1 - DSHOT_MIN_THROTTLE) / 100.0f) * CONVERT_PARAMETER_TO_PERCENT(motorConfig->digitalIdleOffsetValue);
         *outputHigh = DSHOT_MAX_THROTTLE - outputLimitOffset / 2;
         *deadbandMotor3dHigh = DSHOT_3D_FORWARD_MIN_THROTTLE + ((DSHOT_MAX_THROTTLE - DSHOT_3D_FORWARD_MIN_THROTTLE) / 100.0f) * CONVERT_PARAMETER_TO_PERCENT(motorConfig->digitalIdleOffsetValue);
@@ -69,7 +69,7 @@ float dshotConvertFromExternal(uint16_t externalValue)
 
     externalValue = constrain(externalValue, PWM_RANGE_MIN, PWM_RANGE_MAX);
 
-    if (featureIsEnabled(FEATURE_3D)) {
+    if (false) { // HF3D: FEATURE_3D
         if (externalValue == PWM_RANGE_MIDDLE) {
             motorValue = DSHOT_CMD_MOTOR_STOP;
         } else if (externalValue < PWM_RANGE_MIDDLE) {
@@ -88,7 +88,7 @@ uint16_t dshotConvertToExternal(float motorValue)
 {
     uint16_t externalValue;
 
-    if (featureIsEnabled(FEATURE_3D)) {
+    if (false) { // HF3D: FEATURE_3D
         if (motorValue == DSHOT_CMD_MOTOR_STOP || motorValue < DSHOT_MIN_THROTTLE) {
             externalValue = PWM_RANGE_MIDDLE;
         } else if (motorValue <= DSHOT_3D_FORWARD_MIN_THROTTLE - 1) {
