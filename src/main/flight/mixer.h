@@ -27,6 +27,14 @@
 #include "drivers/io_types.h"
 #include "drivers/pwm_output.h"
 
+
+typedef enum {
+    RPM_SRC_NONE = 0,
+    RPM_SRC_DSHOT_TELEM,
+    RPM_SRC_FREQ_SENSOR,
+    RPM_SRC_ESC_SENSOR,
+} rpmSource_e;
+
 typedef enum mixerMode
 {
     MIXER_TRI = 1,
@@ -78,6 +86,7 @@ typedef struct mixerConfig_s {
     bool yaw_motors_reversed;
     uint16_t gov_max_headspeed;
     uint16_t gov_gear_ratio;
+    uint16_t gov_rpm_lpf;
     uint16_t gov_p_gain;
     uint16_t gov_i_gain;
     uint16_t gov_cyclic_ff_gain;
@@ -103,6 +112,7 @@ bool areMotorsRunning(void);
 void initEscEndpoints(void);
 void mixerInit(void);
 void mixerInitProfile(void);
+void mixerRpmSourceInit(void);
 
 void mixerConfigureOutput(void);
 
@@ -116,5 +126,11 @@ float mixerGetThrottle(void);
 uint8_t isHeliSpooledUp(void);
 float mixerGetGovGearRatio(void);
 float mixerGetGovCollectivePulseFilterGain(void);
-float mixerGetHeadSpeed(void);
 
+float getHeadSpeed(void);
+
+int calcMotorRpm(uint8_t motor, int erpm);
+int getMotorRPM(uint8_t motor);
+int getMotorRawRPM(uint8_t motor);
+
+bool isRpmSourceActive(void);
