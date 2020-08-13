@@ -59,8 +59,6 @@
 #include "flight/failsafe.h"
 #include "flight/mixer.h"
 #include "flight/pid.h"
-#include "flight/rpm_filter.h"
-#include "flight/servos.h"
 
 #include "io/beeper.h"
 #include "io/gps.h"
@@ -1073,7 +1071,7 @@ static void loadMainState(timeUs_t currentTimeUs)
 
     const int motorCount = getMotorCount();
     for (int i = 0; i < motorCount; i++) {
-        blackboxCurrent->motor[i] = motor[i];
+        blackboxCurrent->motor[i] = motorOutput[i];
     }
 
     blackboxCurrent->vbatLatest = getBatteryVoltageLatest();

@@ -1,21 +1,18 @@
 /*
- * This file is part of Cleanflight and Betaflight.
+ * This file is part of Heliflight 3D.
  *
- * Cleanflight and Betaflight are free software. You can redistribute
- * this software and/or modify this software under the terms of the
- * GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option)
- * any later version.
+ * Heliflight 3D is free software. You can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- * Cleanflight and Betaflight are distributed in the hope that they
- * will be useful, but WITHOUT ANY WARRANTY; without even the implied
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * Heliflight 3D is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this software.
- *
- * If not, see <http://www.gnu.org/licenses/>.
+ * along with this software. If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <stdbool.h>
@@ -26,836 +23,160 @@
 #include "platform.h"
 
 #include "build/build_config.h"
-#include "build/debug.h"
 
 #include "common/axis.h"
 #include "common/filter.h"
 #include "common/maths.h"
 
-#include "config/feature.h"
-
-#include "pg/motor.h"
-#include "pg/rx.h"
-
-#include "drivers/dshot.h"
-#include "drivers/motor.h"
-#include "drivers/freq.h"
-#include "drivers/time.h"
-#include "drivers/io.h"
-
-#include "io/motors.h"
-
 #include "config/config.h"
-#include "fc/controlrate_profile.h"
+#include "config/config_reset.h"
+
+#include "fc/runtime_config.h"
 #include "fc/rc_controls.h"
 #include "fc/rc_modes.h"
-#include "fc/runtime_config.h"
-#include "fc/core.h"
-#include "fc/rc.h"
 
-#include "flight/failsafe.h"
-#include "flight/imu.h"
-#include "flight/gps_rescue.h"
-#include "flight/mixer.h"
 #include "flight/pid.h"
-#include "flight/rpm_filter.h"
-#include "flight/servos.h"
+#include "flight/imu.h"
+#include "flight/mixer.h"
+#include "flight/governor.h"
 
 #include "rx/rx.h"
 
-#include "sensors/battery.h"
+#include "io/gimbal.h"
+
+#include "pg/pg.h"
+#include "pg/pg_ids.h"
+
 #include "sensors/gyro.h"
-#include "sensors/esc_sensor.h"
 
-PG_REGISTER_WITH_RESET_TEMPLATE(mixerConfig_t, mixerConfig, PG_MIXER_CONFIG, 0);
 
-#define DYN_LPF_THROTTLE_STEPS           100
-#define DYN_LPF_THROTTLE_UPDATE_DELAY_US 5000 // minimum of 5ms between updates
+PG_REGISTER_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules, PG_HELI_MIXER, 0);
 
-PG_RESET_TEMPLATE(mixerConfig_t, mixerConfig,
-    .yaw_motors_reversed = false,
-    .gov_max_headspeed = 7000,
-    .gov_gear_ratio = 1000,
-    .gov_rpm_lpf = 50,
-    .gov_p_gain = 0,
-    .gov_i_gain = 0,
-    .gov_cyclic_ff_gain = 0,
-    .gov_collective_ff_gain = 0,
-    .gov_collective_ff_impulse_gain = 0,
-    .spoolup_time = 10
-);
 
-PG_REGISTER_ARRAY(motorMixer_t, MAX_SUPPORTED_MOTORS, customMotorMixer, PG_MOTOR_MIXER, 0);
+int mixerActiveServos = 0;
+int mixerActiveMotors = 0;
 
-#define PWM_RANGE_MID 1500
+static FAST_RAM_ZERO_INIT uint8_t mixerRuleCount;
 
-static motorMixer_t activeMixer[MAX_SUPPORTED_MOTORS];
+static FAST_RAM_ZERO_INIT mixer_t mixer[MIXER_RULE_COUNT];
 
-static FAST_RAM_ZERO_INIT uint8_t motorCount;
+static FAST_RAM_ZERO_INIT float mixerInput[MIXER_INPUT_COUNT];
+static FAST_RAM_ZERO_INIT float mixerOutput[MIXER_OUTPUT_COUNT];
 
-float FAST_RAM_ZERO_INIT motor[MAX_SUPPORTED_MOTORS];
-float motor_disarmed[MAX_SUPPORTED_MOTORS];
+static FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
 
-uint8_t motorRpmSource;
-pt1Filter_t motorRpmFilter[MAX_SUPPORTED_MOTORS];
+static FAST_RAM_ZERO_INIT float cyclicTotal = 0;
+static FAST_RAM_ZERO_INIT float cyclicLimit = 1;
 
-FAST_RAM_ZERO_INIT float motorOutputHigh, motorOutputLow;
-
-static FAST_RAM_ZERO_INIT float disarmMotorOutput, deadbandMotor3dHigh, deadbandMotor3dLow;
-static FAST_RAM_ZERO_INIT float rcCommandThrottleRange;
-
-// Governor & Spool-up
-static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
-static FAST_RAM_ZERO_INIT float govGearRatio;
-static FAST_RAM_ZERO_INIT float govRampRate;
-static FAST_RAM_ZERO_INIT float govKp;
-static FAST_RAM_ZERO_INIT float govKi;
-static FAST_RAM_ZERO_INIT float govCycKf;
-static FAST_RAM_ZERO_INIT float govColKf;
-static FAST_RAM_ZERO_INIT float govColPulseKf;
-
-uint8_t getMotorCount(void)
-{
-    return motorCount;
-}
-
-bool areMotorsRunning(void)
-{
-    bool motorsRunning = false;
-    if (ARMING_FLAG(ARMED)) {
-        motorsRunning = true;
-    } else {
-        for (int i = 0; i < motorCount; i++) {
-            if (motor_disarmed[i] != disarmMotorOutput) {
-                motorsRunning = true;
-
-                break;
-            }
-        }
-    }
-
-    return motorsRunning;
-}
-
-int calcMotorRpm(uint8_t motorNumber, int erpm)
-{
-    int div = motorConfig()->motorPoleCount[motorNumber] / 2;
-    return (erpm * 100) / MAX(div,1);
-}
-
-int getMotorRawRPM(uint8_t motor)
-{
-    int erpm;
-#ifdef USE_DSHOT_TELEMETRY
-    if (motorRpmSource == RPM_SRC_DSHOT_TELEM) {
-        erpm = getDshotTelemetry(motor);
-    }
-    else
-#endif
-#ifdef USE_FREQ_SENSOR
-    if (motorRpmSource == RPM_SRC_FREQ_SENSOR) {
-        erpm = getFreqSensorRPM(motor);
-    }
-    else
-#endif
-#ifdef USE_ESC_SENSOR
-    if (motorRpmSource == RPM_SRC_ESC_SENSOR) {
-        erpm = getEscSensorRPM(motor);
-    }
-    else
-#endif
-    {
-        erpm = 0;
-    }
-    return calcMotorRpm(motor,erpm);
-}
-
-int getMotorRPM(uint8_t motor)
-{
-    return motorRpmFilter[motor].state;
-}
-
-float getMinMotorFreq(void)
-{
-    float rpm = 1e9;
-    for (int i = 0; i < motorCount; i++) {
-        rpm = MIN(rpm, getMotorRPM(i));
-    }
-    return rpm / 60.0f;
-}
-
-// All PWM motor scaling is done to standard PWM range of 1000-2000 for easier tick conversion with legacy code / configurator
-// DSHOT scaling is done to the actual dshot range
-void initEscEndpoints(void)
-{
-    float motorOutputLimit = 1.0f;
-    if (currentPidProfile->motor_output_limit < 100) {
-        motorOutputLimit = currentPidProfile->motor_output_limit / 100.0f;
-    }
-
-    motorInitEndpoints(motorConfig(), motorOutputLimit, &motorOutputLow, &motorOutputHigh, &disarmMotorOutput, &deadbandMotor3dHigh, &deadbandMotor3dLow);
-
-    rcCommandThrottleRange = PWM_RANGE_MAX - PWM_RANGE_MIN;
-}
-
-// Initialize pidProfile related mixer settings
-void mixerInitProfile(void)
-{
-
-}
 
 void mixerInit(void)
 {
-    initEscEndpoints();
+    mixerRuleCount = 0;
 
-    mixerInitProfile();
-
-    // Initialize governor settings
-    govMaxHeadspeed = mixerConfig()->gov_max_headspeed;
-    govGearRatio = (float)mixerConfig()->gov_gear_ratio / 1000.0f;
-    govKp = (float)mixerConfig()->gov_p_gain / 10.0f;
-    govKi = (float)mixerConfig()->gov_i_gain / 10.0f;
-    govCycKf = (float)mixerConfig()->gov_cyclic_ff_gain / 100.0f;
-    govColKf = (float)mixerConfig()->gov_collective_ff_gain / 10000.0f;
-    govColPulseKf = (float)mixerConfig()->gov_collective_ff_impulse_gain / 10000.0f;
-}
-
-// called from init at FC startup.
-void mixerRpmSourceInit(void)
-{
-    // HF3D: TODO make this motor specific
-#ifdef USE_DSHOT_TELEMETRY
-    if (motorConfig()->dev.useDshotTelemetry) {
-        motorRpmSource = RPM_SRC_DSHOT_TELEM;
-    }
-    else
-#endif
-#ifdef USE_FREQ_SENSOR
-    if (featureIsEnabled(FEATURE_FREQ_SENSOR)) {
-        motorRpmSource = RPM_SRC_FREQ_SENSOR;
-    }
-    else
-#endif
-#ifdef USE_ESC_SENSOR
-    if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
-        motorRpmSource = RPM_SRC_ESC_SENSOR;
-    }
-    else
-#endif
-    {
-        motorRpmSource = RPM_SRC_NONE;
-    }
-
-    for (int motor=0; motor<MAX_SUPPORTED_MOTORS; motor++) {
-        pt1FilterInit(&motorRpmFilter[motor], pt1FilterGain(mixerConfig()->gov_rpm_lpf, pidGetDT()));
-    }
-}
-
-void mixerConfigureOutput(void)
-{
-    motorCount = 0;
-
-    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        if ((customMotorMixer(i)->throttle == 0.0f) &&
-            (customMotorMixer(i)->pitch == 0.0f) &&
-            (customMotorMixer(i)->roll == 0.0f) &&
-            (customMotorMixer(i)->yaw == 0.0f)) {
+    for (int i = 0; i < MIXER_RULE_COUNT; i++) {
+        if (mixerRules(i)->oper == MIXER_OP_NUL)
             break;
-        }
-        activeMixer[i] = *customMotorMixer(i);
-        motorCount++;
-    }
-
-    mixerResetDisarmedMotors();
-}
-
-void mixerResetDisarmedMotors(void)
-{
-    // set disarmed motor values
-    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        motor_disarmed[i] = disarmMotorOutput;
+        
+        if (mixerRules(i)->output < MIXER_OUTPUT_MOTORS)
+            mixerActiveServos = MAX(mixerActiveServos, i + 1);
+        else
+            mixerActiveMotors = MAX(mixerActiveMotors, i - MIXER_OUTPUT_MOTORS + 1);
+            
+        memcpy(&mixer[i], mixerRules(i), sizeof(mixer_t));
+        
+        mixerRuleCount++;
     }
 }
 
-void writeMotors(void)
+void mixerInitProfile(void)
 {
-    motorWriteAll(motor);
+    cyclicLimit = currentPidProfile->pidSumLimit * PID_MIXER_SCALING;
 }
 
-static void writeAllMotors(int16_t mc)
+void mixerUpdate(void)
 {
-    // Sends commands to all motors
-    for (int i = 0; i < motorCount; i++) {
-        motor[i] = mc;
-    }
-    writeMotors();
-}
+    mixerInput[INPUT_STABILIZED_ROLL]  = constrainf(pidData[FD_ROLL].Sum,  -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+    mixerInput[INPUT_STABILIZED_PITCH] = constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+    mixerInput[INPUT_STABILIZED_YAW]   = constrainf(pidData[FD_YAW].Sum,   -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
 
-void stopMotors(void)
-{
-    writeAllMotors(disarmMotorOutput);
-    delay(50); // give the timers and ESCs a chance to react.
-}
-
-static FAST_RAM_ZERO_INIT float throttle = 0;
-static FAST_RAM_ZERO_INIT float mixerThrottle = 0;
-static FAST_RAM_ZERO_INIT float motorOutputMin;
-static FAST_RAM_ZERO_INIT float motorRangeMin;
-static FAST_RAM_ZERO_INIT float motorRangeMax;
-static FAST_RAM_ZERO_INIT float motorOutputRange;
-static FAST_RAM_ZERO_INIT int8_t motorOutputMixSign;
-
-
-static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
-{
-    UNUSED(currentTimeUs);
-    static float motorRangeMinIncrease = 0;
-    float currentThrottleInputRange = 0;
-
-    {
-        throttle = rcCommand[THROTTLE] - PWM_RANGE_MIN;
-        float appliedMotorOutputLow = motorOutputLow;
-        motorRangeMax = motorOutputHigh;
-
-        currentThrottleInputRange = rcCommandThrottleRange;
-        motorRangeMin = appliedMotorOutputLow + motorRangeMinIncrease * (motorOutputHigh - appliedMotorOutputLow);
-        motorOutputMin = motorRangeMin;
-        motorOutputRange = motorRangeMax - motorRangeMin;
-        motorOutputMixSign = 1;
-    }
-
-    throttle = constrainf(throttle / currentThrottleInputRange, 0.0f, 1.0f);
-}
-
-// HF3D TODO:  Move governor logic to separate source file
-static FAST_RAM_ZERO_INIT float lastSpoolThrottle = 0;
-static FAST_RAM_ZERO_INIT uint8_t spooledUp = 0;
-static FAST_RAM_ZERO_INIT float governorSetpoint;
-static FAST_RAM_ZERO_INIT float governorSetpointLimited = 0.0f;
-static FAST_RAM_ZERO_INIT float govBaseThrottle;
-static FAST_RAM_ZERO_INIT float govPidSum = 0;
-static FAST_RAM_ZERO_INIT float govI = 0;
-static FAST_RAM_ZERO_INIT float govCollectiveFF = 0;
-static FAST_RAM_ZERO_INIT float govCollectivePulseFF = 0;
-static FAST_RAM_ZERO_INIT timeMs_t lastSpoolEndTime = 0;
-static FAST_RAM_ZERO_INIT float headspeed = 0;
-
-static void applyMixToMotors(float motorMix[MAX_SUPPORTED_MOTORS])
-{
-    // HF3D: Re-wrote this section for main and optional tail motor use.  No longer valid for multirotors.
-    //   Main motor must be motor[0] (Motor 0)
-    //     * Use resource assignment to reassign output pin on board for main motor ESC to Motor 1
-    //     * mmix 0 uses the Throttle% to determine ramp rate
-    //   Tail motor is optional and must be motor[1] (Motor 1)
-    //     * If used, tail motor should have 100% yaw mixing
-    //     * mmix 1 (tail motor) uses the Throttle% to determine tailMotorBaseThrustGain
-    //     *    1.0 would be way too high.  Full tail thrust when head is at 100% rpm.
+    mixerInput[INPUT_STABILIZED_COLLECTIVE]  = rcCommand[COLLECTIVE];
     
-    // Store mainMotorThrottle so we can override setting later if we're in pass-through mode
-    float mainMotorThrottle = throttle;         // Used later by the tail code to set the base tail motor output as a fraction of main motor output
+    mixerInput[INPUT_GOVERNOR_MAIN] = govOutput[0];
+    mixerInput[INPUT_GOVERNOR_TAIL] = govOutput[1];
 
-    // Calculate rampRate.  Must do it here vs. in init because when mixer is initialized we don't know dT yet.
-    //  HF3D TODO:  This could be moved to a separate "init" function that's called from pid.c's function that sets the dT variable.
-    //     Not sure that complication would really help reduce CPU load much.
-    if (mixerConfig()->spoolup_time > 0) {
-        govRampRate = pidGetDT() / (float)mixerConfig()->spoolup_time;
-    } else {
-        // Assume a ramprate of 8 seconds for external governor / ESC when in pass-through mode.
-        // Will allow us to set spooled-up flag if we see headspeed > 1000rpm on a RPM sensor or telemetry.
-        govRampRate = pidGetDT() / 8.0f;
+    mixerInput[INPUT_GIMBAL_PITCH]  = scaleRangef(attitude.values.pitch, -1800, 1800, -500, 500);
+    mixerInput[INPUT_GIMBAL_ROLL]   = scaleRangef(attitude.values.roll,  -1800, 1800, -500, 500);
+
+    mixerInput[INPUT_RC_ROLL]       = rcData[ROLL]       - rxConfig()->midrc;
+    mixerInput[INPUT_RC_PITCH]      = rcData[PITCH]      - rxConfig()->midrc;
+    mixerInput[INPUT_RC_YAW]        = rcData[YAW]        - rxConfig()->midrc;
+    mixerInput[INPUT_RC_THROTTLE]   = rcData[THROTTLE]   - rxConfig()->midrc;
+    mixerInput[INPUT_RC_COLLECTIVE] = rcData[COLLECTIVE] - rxConfig()->midrc;
+
+    for (int i = 0; i < 8; i++)
+        mixerInput[INPUT_RC_AUX1+i] = rcData[AUX1+i] - rxConfig()->midrc;
+
+    // Current cyclic deflection and limit
+    cyclicTotal = sqrt(mixerInput[INPUT_STABILIZED_ROLL] * mixerInput[INPUT_STABILIZED_ROLL] +
+                       mixerInput[INPUT_STABILIZED_PITCH] * mixerInput[INPUT_STABILIZED_PITCH]);
+
+    // Cyclic ring limit reached
+    if (cyclicTotal > cyclicLimit) {
+        mixerInput[INPUT_STABILIZED_ROLL]  *= cyclicLimit / cyclicTotal;
+        mixerInput[INPUT_STABILIZED_PITCH] *= cyclicLimit / cyclicTotal;
     }
 
-    // Handle MAIN motor (motor[0]) throttle output & spool-up
-    if (motorCount > 0) {
-
-        // Calculate headspeed
-        headspeed = getMotorRPM(0) / govGearRatio;
-        
-        // Some logic to help us come back from a stage 1 failsafe / glitch / RPM loss / accidental throttle hold quickly
-        // We're going to use this time to lock in our spooledUp state for a few seconds after throttle = 0 when we were just spooledUp on the last pass through
-        // Also gives us a few second window if we lose headspeed signal... in that case we'll fall back to the commanded throttle value
-        if (spooledUp && (throttle == 0.0f || headspeed < 1000.0f) && cmp32(millis(), lastSpoolEndTime) > 5500) {
-            // Time check above must be set just a little longer than any of the lastSpoolEndTime checks below.
-            // HF3D TODO:  Maybe change the throttle check above to something >0.0f or add some more logic to allow for a faster ramp for autorotation bailout of some kind?
-            lastSpoolEndTime = millis();
-        }
-                
-        // Determine governor setpoint (use governor if throttle setting is >50%)
-        // HF3D TODO:  Check !isDshotMotorTelemetryActive(i)
-        if (throttle > 0.50 && govMaxHeadspeed > 0) {
-
-            // Set the user requested governor headspeed setting
-            governorSetpoint = throttle * govMaxHeadspeed;
-            
-            // If we don't have a non-zero rate limited setpoint yet, set it to the headspeed
-            if (governorSetpointLimited <= 0) {
-                governorSetpointLimited = headspeed;
-            }
-            
-            // Increment or decrement the rate limited governor setpoint if needed
-            // If ramp is set to 5s then this will allow 20% change in 1 second, or 10% headspeed in 0.5 seconds.
-            float rampRate = govRampRate * govMaxHeadspeed;
-            // Check to see if we've been spooledUp recently .  If so, increase our rampRate greatly to help recover from temporary loss of throttle signal.
-            // HF3D TODO:  If someone immediately plugged in their heli, armed, and took off throttle hold we could accidentally hit this fast governor ramp.  That would be crazy... but possible I guess?
-            if ( spooledUp && cmp32(millis(), lastSpoolEndTime) < 5000 ) {
-                rampRate *= 7.0f;
-            }
-            if ((governorSetpoint - governorSetpointLimited) > rampRate) {
-                // Setpoint is higher than the rate limited setpoint, so increment limited setpoint higher
-                governorSetpointLimited = constrainf(governorSetpointLimited + rampRate, governorSetpointLimited, governorSetpoint);                
-            
-            } else if ((governorSetpointLimited - governorSetpoint) > rampRate)  {
-                // Setpoint is lower than the rate limited setpoint, so decrement limited setpoint lower
-                governorSetpointLimited = constrainf(governorSetpointLimited - rampRate, governorSetpoint, governorSetpointLimited);
-            }
-        } else {
-            // Throttle is less than 50%, don't use governor.
-            governorSetpoint = 0;
-            governorSetpointLimited = 0;
-        }
-
-        if (headspeed == 0) {
-            // Disable governor if main motor RPM is not available
-            governorSetpoint = 0;
-            governorSetpointLimited = 0;
-        }
-    
-        //----------------- Spoolup Logic ----------------
-        // MVP:  If Main Motor RPM <1000, then reset spooledUp flag and use spooledUp logic
-        // HF3D TODO:  Add auto-rotation mode that ignores this check, or at least decreases the ramp time significantly.
-        // HF3D TODO:  Clean-up spool-up logic that allows for 2 modes:  Spool on throttle % only (no RPM telemetry), and Spool on Governor (Headspeed)
-        //    May be easier to just have 2 sets of code... 1 for spooling on governor and one for spooling without governor??
-        // HF3D TODO:
-        //  Idea for RPM-based spool-up logic when governor is active...
-        //  Bring throttle up to ~25%.  If no RPM detected, then disarm.
-        //  Once RPM is detected, start tracking PWM vs. RPM.  
-        //  If there becomes a large discrepency between PWM ramp and RPM ramp, then stop ramping PWM until ratio comes back in line.
-        //  This will prevent the "lag" that sometimes occurs where we end up ramping PWM into oblivion and then the ESC "catches up" later on.
-        //  See 4/9/20 log #7
-
-        // Spool-up using governorSetpoint (not the rate limited GovernorSetpoint)
-        // Determine spoolup status
-        if (headspeed < 1000.0f && cmp32(millis(), lastSpoolEndTime) > 3000) {
-            // Require heli to spin up slowly if it's been more than 3 seconds since we last had a headspeed below 1000 rpm
-            spooledUp = 0;
-
-        } else if (!governorSetpoint && throttle <= lastSpoolThrottle) {
-            // Governor is disabled, running on throttle % only.
-            // If user spools up above 1000rpm, then lowers throttle below the last spool target, allow the heli to be considered spooled up
-            spooledUp = 1;
-            lastSpoolThrottle = throttle;        // Allow spool target to reduce with throttle freely even if already spooledUp.
-            // HF3D TODO:  There's a bug with this block....
-            //   If you spool up above 1000rpm and then come back below that throttle setting (normal mode)
-            //   lastSpoolThrottle will ONLY go down since that's all it's allowed to do here.
-            //   Then when the governor turns on it gets this really low lastSpoolThrottle value (maybe even zero)
-            //      and then throttle drops to zero and the i-term has to wind up the entire amount.
-            
-        } else if (!spooledUp && governorSetpoint && (headspeed > governorSetpoint*0.97)) {
-            // Governor is enabled, running on headspeed
-            // If headspeed is within 3% of governorSetpoint, consider the heli to be spooled up
-            spooledUp = 1;
-            // Set the governor's base throttle % to our last spooled throttle value
-            govBaseThrottle = lastSpoolThrottle;
-            // Jump the rate limited Setpoint up to the setpoint.
-            governorSetpointLimited = governorSetpoint*0.97f;
-        
-        } else if (!spooledUp && governorSetpoint && (lastSpoolThrottle > 0.90f)) {
-            // Governor is enabled, and we've hit 90% throttle trying to get within 97% the requested headspeed.
-            // HF3D TODO:  Flag and alert user in the logs and/or with beep tones after flight that govMaxHeadspeed is set too high.
-            spooledUp = 1;
-            govBaseThrottle = lastSpoolThrottle;
-            governorSetpointLimited = headspeed;
-        }
-
-        // Handle ramping of throttle
-        // HF3D TODO:  Eventually add a "govEnabled" user setting flag.  If the user doesn't have the governor enabled then we need to not use headspeed to perform our spooledUp check.
-        //   Right now we have governor enabled all of of the time, but eventually the code needs to support running with or without an RPM signal (gov or no gov)
-        // Skip spooling logic if no throttle signal or if we're disarmed
-        if ((throttle == 0.0f) || !ARMING_FLAG(ARMED)) {
-            // Don't reset spooledUp flag because we want throttle to respond quickly if user drops throttle in normal mode or re-arms while blades are still spinning > 1000rpm
-            //   spooledUp flag will reset anyway if RPM < 1000
-            lastSpoolThrottle = 0.0f;         // Require re-spooling to start from zero if RPM<1000 and throttle=0 or disarmed
-        
-        // If not spooled up and throttle is higher than our last spooled-up output, spool some more
-        } else if (!governorSetpoint && !spooledUp && (lastSpoolThrottle < throttle)) {
-            // Governor is disabled, running on throttle % only.
-            throttle = lastSpoolThrottle + govRampRate;
-            lastSpoolThrottle = throttle;
-
-        // If not spooled up and headspeed is lower than our governorSetpoint, spool some more
-        } else if (governorSetpoint && !spooledUp && (headspeed < governorSetpoint)) {
-            // Governor is enabled, running on headspeed.
-            throttle = lastSpoolThrottle + govRampRate;
-            lastSpoolThrottle = throttle;
-        
-        }
-        // --------------- End of Spoolup Logic --------------
-        
-        // --------------- Feedforward Calculations ----------
-        
-        // Quick and dirty collective pitch linear feed-forward for the main motor
-        // Calculate linear feedforward vs. collective stick position (always positive adder)
-        //   Reasonable value would be 0.15 throttle addition for 12-degree collective throw..
-        //   So gains in the 0.0015 - 0.0032 range depending on where max collective pitch is on the heli
-        //   HF3D TODO:  Set this up so works off of a calibrated pitch value for the heli taken during setup
-        govCollectiveFF = govColKf * pidGetCollectiveStickPercent();
-        
-        // Collective pitch impulse feed-forward for the main motor
-        govCollectivePulseFF = govColPulseKf * pidGetCollectiveStickHPF();
-
-        // HF3D TODO:  Add a cyclic stick feedforward to the governor - linear gain should be fine.
-        // Additional torque is required from the motor when adding cyclic pitch, just like collective (although less)
-        // Maybe use this?:  float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
-        // It's calculated like this in the pid.c code:
-        //   Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
-        //   servosGetCyclicDeflection() is a 0..1.0f value that is a fraction of the total cyclic travel allowed (usually 10 degrees)
-        float govCyclicFF = govCycKf * servosGetCyclicDeflection();
-        
-        // --------------- End of Feedforward Calculations ---
-
-        // --------------- Governor Logic --------------------
-        if (spooledUp && governorSetpointLimited) {
-                
-            // Calculate error as a percentage of the max headspeed, since 100% throttle should be close to max headspeed
-            // HF3D TODO:  Do we really want the governor to respond the same even if setpoint is only 60% of max?
-            //   100 rpm error on 60% of max would "feel" a lot different than 100 rpm error on 90% of max headspeed.
-            //   But would it really require any torque differences for the same response??  Maybe, since less inertia in head?
-            float govError = (governorSetpointLimited - headspeed) / govMaxHeadspeed;
-            
-            // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
-            float govP = govKp * govError;
-            // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
-            govI = constrainf(govI + govKi * govError * pidGetDT(), -50.0f, 50.0f);
-            govPidSum = govP + govI;
-            // float govPidSum = govP + govI;
-            
-            // HF3D TODO:  Scale the sums based on the average battery voltage?
-            //  Note:  This should NOT apply to the tail feedforward compensations that go into the PID controller!
-            //         Those compensations are related to the amount of TORQUE only... and this comp would be trying
-            //            to keep torque equal, so those shouldn't have to change.
-            
-            // Generate our new governed throttle signal
-            throttle = govBaseThrottle + govCollectiveFF + govCollectivePulseFF + govCyclicFF + govPidSum;
-            // Reset any wind-up due to excess control signal
-            if (throttle > 1.0f) {
-                // Remove last addition to I-term to prevent further wind-up if it was moving us towards this over-control
-                if (govError > 0.0f) {
-                    govI = govI - govKi * govError * pidGetDT();
-                }
-                throttle = 1.0f;
-           
-            } else if (throttle < 0.0f) {
-                // Remove last addition to I-term to prevent further wind-up if it was moving us towards this over-control
-                // HF3D TODO:  What if I-term was at contraints before we did this?
-                if (govError < 0.0f) {
-                    govI = govI - govKi * govError * pidGetDT();
-                }
-
-                throttle = 0.0f;
-            }
-
-            // pidGetdT() = targetPidLooptime * 1e-6f;  // 0.00125 for 8kHz
-            // Calculate similar to pt1FilterGain with cutoff frequency of 0.05Hz (20s)
-            //   RC = 1 / ( 2 * M_PI_FLOAT * f_cut);  ==> RC = 3.183
-            //   k = dT / (RC + dT);                  ==>  k = 0.0000393
-            // Slowly adapt our govBaseThrottle over time (LPF) as a fallback in case we lose RPM data.
-            // HF3D TODO:  If always flying at high collective pitch, that govCollectiveFF will end up adding into the govBaseThrottle
-            //    This means the base throttle will be ramped way up if then go back towards a lower average pitch... is that a problem?
-            //float govBaseThrottleChange = (throttle - govBaseThrottle) * govBaseThrottleFilterGain;
-            //govBaseThrottle += govBaseThrottleChange;
-            // Adjust the I-term to account for the base throttle adjustment we just made
-            // HF3D TODO:  What if I-term was at contraints before we did this?
-            //govI -= govBaseThrottleChange;
-        
-            // Set lastSpoolThrottle to track the governor throttle signal when the governor is active
-            lastSpoolThrottle = throttle;
-
-            DEBUG_SET(DEBUG_GOVERNOR, 2, govPidSum*1000.0f);             // Max pidsum will be around 1, so increase by 1000x
-        }
-        
-        // Enable pass-through of throttle signal if spoolup_time setting = 0 and we are armed.
-        //   Must be used in conjunction with setting   gov_max_headspeed = 0 to have the spoolUp flag be set if an RPM sensor/telemetry is working.
-        //   spooledUp flag will be set 8 seconds after throttle hold is released if headspeed > 1000 rpm.
-        if ((mixerConfig()->spoolup_time == 0) && (ARMING_FLAG(ARMED))) {
-            throttle = mainMotorThrottle;    // We stored the original value of the throttle signal into mainMotorThrottle variable at the beginning of the governor/spoolup code
-        }
-        
-        mainMotorThrottle = throttle;        // Used by the tail motor code to set the base tail motor output as a fraction of main motor output
-
-        DEBUG_SET(DEBUG_GOVERNOR, 0, governorSetpointLimited);
-        DEBUG_SET(DEBUG_GOVERNOR, 1, headspeed);
-        DEBUG_SET(DEBUG_GOVERNOR, 2, getMotorRPM(0));
-        DEBUG_SET(DEBUG_GOVERNOR, 3, getMotorRPM(1));
-
-        // HF3D:  Modified original code to ignore any idle offset value when scaling main motor output -- we should always ensure that the main motor will be 100% stopped at zero throttle.
-        //   motorOutputMin = motorRangeMin = motorOutputLow = DSHOT_MIN_THROTTLE
-        float motorOutput;
-#ifdef USE_DSHOT
-        if (isMotorProtocolDshot()) {
-            motorOutput = DSHOT_MIN_THROTTLE + (motorOutputHigh - DSHOT_MIN_THROTTLE) * throttle;
-        } else
-#endif
-        {
-            // For analog PWM, use disarmMotorOutput for safety
-            // if min_command = 1000 and max_command = 1940  =>  motorOutput = 1000 + (940)*throttle
-            motorOutput = disarmMotorOutput + (motorOutputHigh - disarmMotorOutput) * throttle;
-        }
-
-        if (failsafeIsActive()) {
-#ifdef USE_DSHOT
-            if (isMotorProtocolDshot()) {
-                motorOutput = (motorOutput < DSHOT_MIN_THROTTLE) ? disarmMotorOutput : motorOutput; // Prevent getting into special reserved range
-            }
-#endif
-            motorOutput = constrain(motorOutput, disarmMotorOutput, motorRangeMax);        // motorRangeMax = motorOutputHigh   for uni-directional motor rotation
-        } else {
-            // HF3D:  Prevent main motor from running or twitching when dshot_idle_value is used.
-#ifdef USE_DSHOT
-            if (isMotorProtocolDshot()) {
-                // Use DSHOT_MIN_THROTTLE to allow the main motor to come to a complete stop at any time
-                // Also prevents the main motor from "twitching" if the dshot_idle_value is setup to prevent the tail motor from stopping
-                motorOutput = constrain(motorOutput, DSHOT_MIN_THROTTLE, motorRangeMax);
-            } else
-#endif
-            {
-                // HF3D:  For analog PWM control of main motor ESC, motorRangeMin includes motorConfig()->minthrottle parameter.  
-                //   This is NOT good.  Any idle minthrottle setting will cause the ESC to twitch when at zero throttle.  Set to disarmMotorOutput for now just to be safe.
-                motorOutput = constrain(motorOutput, disarmMotorOutput, motorRangeMax);
-            }
-        }
-        motor[0] = motorOutput;
-        
-    } // end of Main Motor handling (motor[0])
-
-    // Handle the TAIL motor mixing & control (motor[1])
-    // HF3D TODO:  Eventually need to support motor driven + variable pitch combination tails
-    if (motorCount > 1) {
-
-        // motorMix for tail motor should be 100% stabilized yaw channel
-        float motorOutput = motorOutputMixSign * motorMix[1];
-        
-        //  For a tail motor.. we don't really want it spinning like crazy from base thrust anytime we're armed,
-        //   so tone the motorOutput down a bit using the mainMotorThrottle as a gain until we're at half our throttle setting or something.
-        if (!spooledUp) {
-            // Track the main motor output while spooling up so that we don't have our tail motor going nuts at zero throttle
-            motorOutput = mainMotorThrottle * motorOutput;
-        }
-        
-        // Linearize the tail motor thrust  (pidApplyThrustLinearization)
-#ifdef USE_THRUST_LINEARIZATION
-        // Scale PID sums and throttle to linearize the system (thrust varies with rpm^2)
-        //   https://github.com/betaflight/betaflight/pull/7304
-        motorOutput = pidApplyThrustLinearization(motorOutput);
-#endif
-
-        // Just using the base thrust from the PID controller now.  Eventually need to revisit this.
-        // Base thrust should vary with main motor RPM^2, but our tail motor also has thrust^2, so increase in base thrust will be linear
-        //   Divider should be the maximum headspeed the heli can achieve
-        //   Tail motor thrust needs to track main motor torque.  On a non-motor tail the tail RPM tracks the main motor RPM by default.
-        
-        //motorOutput += (mainMotorThrottle * tailMotorBaseThrustGain);       // Probably something like 0.2 would be a good setting for this?  Just a guess.
-        //  ^^ Actually, I think this is a bad idea.  Base tail thrust will actually need to INCREASE for lower headspeeds.  Lower mainshaft rpm with some power input = more torque necessary.
-        //motorOutput += (mainMotorRPM/6000.0f)*tailMotorBaseThrustGain;    // Just guessing that 20% thrust on tail will be about right for 100% rpm on head.  Nevermind, see above.  This is wrong.
-
-        // scale tail motor output to full motor output range, including impact of any idle offset.  
-        // Note that motorOutput here can still be < 0 if the motorMix is sufficiently negative.  Idle offset will be taken into account again down below.
-        motorOutput = motorOutputMin + motorOutputRange * motorOutput;
-
-        if (failsafeIsActive()) {
-#ifdef USE_DSHOT
-            if (isMotorProtocolDshot()) {
-                motorOutput = (motorOutput < motorRangeMin) ? disarmMotorOutput : motorOutput; // Prevent getting into special reserved range
-            }
-#endif
-            motorOutput = constrain(motorOutput, disarmMotorOutput, motorRangeMax);
-        } else {
-            // HF3D:  Only use dshot_idle_value when main motor is spinning.
-#ifdef USE_DSHOT
-            if (isMotorProtocolDshot()) {
-                if (mainMotorThrottle > 0.0) {
-                    // Use dshot_idle_value to prevent tail from stopping when main motor is running
-                    // motorRangeMin = DSHOT_MIN_THROTTLE + ((DSHOT_MAX_THROTTLE - DSHOT_MIN_THROTTLE) / 100.0f) * CONVERT_PARAMETER_TO_PERCENT(motorConfig()->digitalIdleOffsetValue);
-                    motorOutput = constrain(motorOutput, motorRangeMin, motorRangeMax);
-                } else {
-                    // Use DSHOT_MIN_THROTTLE to allow the tail to come to a complete stop when main motor isn't running
-                    motorOutput = constrain(motorOutput, DSHOT_MIN_THROTTLE, motorRangeMax);
-                }
-            } else
-#endif
-            {
-                // Handle analog PWM tail motor ESC.  Not sure why anyone would do that... but, okay.
-                if (mainMotorThrottle > 0.0) {
-                    // Use minThrottle value to prevent tail from stopping when main motor is running
-                    motorOutput = constrain(motorOutput, motorRangeMin, motorRangeMax);
-                } else {
-                    motorOutput = constrain(motorOutput, disarmMotorOutput, motorRangeMax);
-                }
-            }
-        }
-        motor[1] = motorOutput;     // Set final tail motor output
-
-    }  // end of tail motor handling
-     
-    // HF3D does not support more than 1 main and 1 tail motor.  Turn any additional motors off.
-    for (int i = 2; i < motorCount; i++) {
-        motor[i] = disarmMotorOutput;
-    }
-
-    // Disarmed mode check
+    // Input override
     if (!ARMING_FLAG(ARMED)) {
-        for (int i = 0; i < motorCount; i++) {
-            motor[i] = motor_disarmed[i];
+        for (int i = 0; i < MIXER_INPUT_COUNT; i++) {
+            if (mixerOverride[i] != MIXER_OVERRIDE_OFF)
+                mixerInput[i] = mixerOverride[i];
+        }
+    }
+
+    // Calculate mixer outputs
+    for (int i = 0; i < MIXER_OUTPUT_COUNT; i++) {
+        mixerOutput[i] = 0;
+    }
+    
+    for (int i = 0; i < mixerRuleCount; i++) {
+        int src = mixer[i].input;
+        int dst = mixer[i].output;
+        float val = constrain(mixer[i].offset + mixerInput[src] * mixer[i].rate, mixer[i].min, mixer[i].max) / 1000.0f;
+        
+        switch (mixer[i].oper)
+        {
+            case MIXER_OP_SET:
+                mixerOutput[dst] = val;
+                break;
+            case MIXER_OP_ADD:
+                mixerOutput[dst] += val;
+                break;
+            case MIXER_OP_MUL:
+                mixerOutput[dst] *= val;
+                break;
         }
     }
 }
 
-static float applyThrottleLimit(float throttle)
-{
-    if (currentControlRateProfile->throttle_limit_percent < 100) {
-        const float throttleLimitFactor = currentControlRateProfile->throttle_limit_percent / 100.0f;
-        switch (currentControlRateProfile->throttle_limit_type) {
-            case THROTTLE_LIMIT_TYPE_SCALE:
-                return throttle * throttleLimitFactor;
-            case THROTTLE_LIMIT_TYPE_CLIP:
-                return MIN(throttle, throttleLimitFactor);
-        }
-    }
 
-    return throttle;
+float mixerGetInput(uint8_t i)
+{
+    return mixerInput[i];
 }
 
-static void applyMotorStop(void)
+float mixerGetServoOutput(uint8_t i)
 {
-    for (int i = 0; i < motorCount; i++) {
-        motor[i] = disarmMotorOutput;
-    }
+    return mixerOutput[i];
 }
 
-#ifdef USE_DYN_LPF
-static void updateDynLpfCutoffs(timeUs_t currentTimeUs, float throttle)
+float mixerGetMotorOutput(uint8_t i)
 {
-    static timeUs_t lastDynLpfUpdateUs = 0;
-    static int dynLpfPreviousQuantizedThrottle = -1;  // to allow an initial zero throttle to set the filter cutoff
-
-    if (cmpTimeUs(currentTimeUs, lastDynLpfUpdateUs) >= DYN_LPF_THROTTLE_UPDATE_DELAY_US) {
-        const int quantizedThrottle = lrintf(throttle * DYN_LPF_THROTTLE_STEPS); // quantize the throttle reduce the number of filter updates
-        if (quantizedThrottle != dynLpfPreviousQuantizedThrottle) {
-            // scale the quantized value back to the throttle range so the filter cutoff steps are repeatable
-            const float dynLpfThrottle = (float)quantizedThrottle / DYN_LPF_THROTTLE_STEPS;
-            dynLpfGyroUpdate(dynLpfThrottle);
-            dynLpfDTermUpdate(dynLpfThrottle);
-            dynLpfPreviousQuantizedThrottle = quantizedThrottle;
-            lastDynLpfUpdateUs = currentTimeUs;
-        }
-    }
-}
-#endif
-
-FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs)
-{
-    // Find min and max throttle based on conditions. Throttle has to be known before mixing
-    calculateThrottleAndCurrentMotorEndpoints(currentTimeUs);
-
-    // HF3D: Update motor RPM smoothing filters
-    for (int motor = 0; motor < motorCount; motor++) {
-        pt1FilterApply(&motorRpmFilter[motor], getMotorRawRPM(motor));
-    }
-
-    // Calculate and Limit the PID sum
-    const float scaledAxisPidRoll =
-        constrainf(pidData[FD_ROLL].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) / PID_MIXER_SCALING;
-    const float scaledAxisPidPitch =
-        constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) / PID_MIXER_SCALING;
-
-    uint16_t yawPidSumLimit = currentPidProfile->pidSumLimitYaw;
-
-    float scaledAxisPidYaw =
-        constrainf(pidData[FD_YAW].Sum, -yawPidSumLimit, yawPidSumLimit) / PID_MIXER_SCALING;
-
-    if (!mixerConfig()->yaw_motors_reversed) {
-        scaledAxisPidYaw = -scaledAxisPidYaw;
-    }
-
-    // Apply the throttle_limit_percent to scale or limit the throttle based on throttle_limit_type
-    if (currentControlRateProfile->throttle_limit_type != THROTTLE_LIMIT_TYPE_OFF) {
-        throttle = applyThrottleLimit(throttle);
-    }
-
-    // Find roll/pitch/yaw desired output
-    float motorMix[MAX_SUPPORTED_MOTORS];
-    for (int i = 0; i < motorCount; i++) {
-        motorMix[i] =
-            scaledAxisPidRoll  * activeMixer[i].roll +
-            scaledAxisPidPitch * activeMixer[i].pitch +
-            scaledAxisPidYaw   * activeMixer[i].yaw;
-    }
-
-#ifdef USE_DYN_LPF
-    updateDynLpfCutoffs(currentTimeUs, throttle);
-#endif
-
-#ifdef USE_GPS_RESCUE
-    // If gps rescue is active then override the throttle. This prevents things
-    // like throttle boost or throttle limit from negatively affecting the throttle.
-    if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
-        throttle = gpsRescueGetThrottle();
-    }
-#endif
-
-    mixerThrottle = throttle;
-
-    if (featureIsEnabled(FEATURE_MOTOR_STOP)
-        && ARMING_FLAG(ARMED)
-        && !FLIGHT_MODE(GPS_RESCUE_MODE)   // disable motor_stop while GPS Rescue is active
-        && (rcData[THROTTLE] < rxConfig()->mincheck)) {
-        applyMotorStop();
-    } else {
-        // Apply the mix to motor endpoints
-        applyMixToMotors(motorMix);
-    }
+    return (mixerOutput[i + MIXER_OUTPUT_MOTORS] + 1) / 2;
 }
 
-float mixerGetThrottle(void)
+float getCyclicDeflection(void)
 {
-    return mixerThrottle;
-}
-
-
-// HF3D TODO:  Move this to governor/spoolup source file eventually
-//
-// Return the status of whether the heli is spooled up
-//
-// Very critical that this status is correct, because core.c checks it to
-// force the pid controller to reset it's I term on each pass if this is set.
-//
-// Spooled Up is reset to 0 if (mainMotorRPM < 1000.0f)
-//
-// spooledUp will set to "1" the first time if it's a "clean" spoolup
-// where you arm and spool to a single throttle setpoint.
-//
-// Jacking around with the throttle during spoolup could cause it to set
-// the spooledUp flag instantly if you're already above 1000rpm.
-//
-// If user spools up above 1000rpm, then lowers throttle below the last
-// spool target reached, the heli will be considered spooled up.
-
-uint8_t isHeliSpooledUp(void)
-{
-    return spooledUp;
-}
-
-float mixerGetGovGearRatio(void)
-{
-    return govGearRatio;
-}
-
-float getHeadSpeed(void)
-{
-    return headspeed;
-}
-
-bool isRpmSourceActive(void)
-{
-    return (motorRpmSource != RPM_SRC_NONE);
+    return MIN(cyclicTotal / cyclicLimit, 1.0f);
 }
 
