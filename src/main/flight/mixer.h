@@ -1,136 +1,109 @@
 /*
- * This file is part of Cleanflight and Betaflight.
+ * This file is part of Heliflight 3D.
  *
- * Cleanflight and Betaflight are free software. You can redistribute
- * this software and/or modify this software under the terms of the
- * GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option)
- * any later version.
+ * Heliflight 3D is free software. You can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- * Cleanflight and Betaflight are distributed in the hope that they
- * will be useful, but WITHOUT ANY WARRANTY; without even the implied
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * Heliflight 3D is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this software.
- *
- * If not, see <http://www.gnu.org/licenses/>.
+ * along with this software. If not, see <https://www.gnu.org/licenses/>.
  */
 
 #pragma once
 
-#include "platform.h"
-
-#include "common/time.h"
 #include "pg/pg.h"
+
 #include "drivers/io_types.h"
 #include "drivers/pwm_output.h"
 
+#include "flight/servos.h"
+#include "flight/motors.h"
+#include "flight/governor.h"
+#include "flight/rpm_filter.h"
 
-typedef enum {
-    RPM_SRC_NONE = 0,
-    RPM_SRC_DSHOT_TELEM,
-    RPM_SRC_FREQ_SENSOR,
-    RPM_SRC_ESC_SENSOR,
-} rpmSource_e;
 
-typedef enum mixerMode
+enum {
+    MIXER_IN_NONE = 0,
+    MIXER_IN_STABILIZED_ROLL,
+    MIXER_IN_STABILIZED_PITCH,
+    MIXER_IN_STABILIZED_YAW,
+    MIXER_IN_STABILIZED_COLLECTIVE,
+    MIXER_IN_GOVERNOR_MAIN,
+    MIXER_IN_GOVERNOR_TAIL,
+    MIXER_IN_RC_ROLL,
+    MIXER_IN_RC_PITCH,
+    MIXER_IN_RC_YAW,
+    MIXER_IN_RC_THROTTLE,
+    MIXER_IN_RC_COLLECTIVE,
+    MIXER_IN_RC_AUX1,
+    MIXER_IN_RC_AUX2,
+    MIXER_IN_RC_AUX3,
+    MIXER_IN_RC_AUX4,
+    MIXER_IN_RC_AUX5,
+    MIXER_IN_RC_AUX6,
+    MIXER_IN_RC_AUX7,
+    MIXER_IN_RC_AUX8,
+    MIXER_IN_COUNT
+};
+
+enum {
+    MIXER_OP_NUL = 0,
+    MIXER_OP_SET,
+    MIXER_OP_ADD,
+    MIXER_OP_MUL,
+    MIXER_OP_COUNT
+};
+
+
+#define MIXER_RULE_COUNT      32
+
+#define MIXER_INPUT_COUNT     MIXER_IN_COUNT
+#define MIXER_OUTPUT_COUNT    (MAX_SUPPORTED_SERVOS + MAX_SUPPORTED_MOTORS)
+#define MIXER_OUTPUT_MOTORS   MAX_SUPPORTED_SERVOS
+
+#define MIXER_OVERRIDE_OFF    1001
+
+
+typedef struct mixer_s
 {
-    MIXER_TRI = 1,
-    MIXER_QUADP = 2,
-    MIXER_QUADX = 3,
-    MIXER_BICOPTER = 4,
-    MIXER_GIMBAL = 5,
-    MIXER_Y6 = 6,
-    MIXER_HEX6 = 7,
-    MIXER_FLYING_WING = 8,
-    MIXER_Y4 = 9,
-    MIXER_HEX6X = 10,
-    MIXER_OCTOX8 = 11,
-    MIXER_OCTOFLATP = 12,
-    MIXER_OCTOFLATX = 13,
-    MIXER_AIRPLANE = 14,
-    MIXER_HELI_120_CCPM = 15,
-    MIXER_HELI_90_DEG = 16,
-    MIXER_VTAIL4 = 17,
-    MIXER_HEX6H = 18,
-    MIXER_PPM_TO_SERVO = 19,
-    MIXER_DUALCOPTER = 20,
-    MIXER_SINGLECOPTER = 21,
-    MIXER_ATAIL4 = 22,
-    MIXER_CUSTOM = 23,
-    MIXER_CUSTOM_AIRPLANE = 24,
-    MIXER_CUSTOM_TRI = 25,
-    MIXER_QUADX_1234 = 26,
-} mixerMode_e;
-
-// Custom mixer data per motor
-typedef struct motorMixer_s {
-    float throttle;
-    float roll;
-    float pitch;
-    float yaw;
-} motorMixer_t;
-
-PG_DECLARE_ARRAY(motorMixer_t, MAX_SUPPORTED_MOTORS, customMotorMixer);
-
-// Custom mixer configuration
-typedef struct mixer_s {
-    uint8_t motorCount;
-    uint8_t useServo;
-    const motorMixer_t *motor;
+    uint8_t oper;              // rule operation
+    uint8_t input;             // input channel
+    uint8_t output;            // output channel
+    int16_t offset;            // output offset -2000..2000%%
+    int16_t rate;              // range [-2000;+2000] ; can be used to adjust rate 0-2000%% and direction
+    int16_t min;               // lower bound of rule range -1000..1000%%
+    int16_t max;               // lower bound of rule range -1000..1000%%
 } mixer_t;
 
-typedef struct mixerConfig_s {
-    bool yaw_motors_reversed;
-    uint16_t gov_max_headspeed;
-    uint16_t gov_gear_ratio;
-    uint16_t gov_rpm_lpf;
-    uint16_t gov_p_gain;
-    uint16_t gov_i_gain;
-    uint16_t gov_cyclic_ff_gain;
-    uint16_t gov_collective_ff_gain;
-    uint16_t gov_collective_ff_impulse_gain;
-    uint16_t spoolup_time;
-} mixerConfig_t;
+PG_DECLARE_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules);
 
-PG_DECLARE(mixerConfig_t, mixerConfig);
 
-#define CHANNEL_FORWARDING_DISABLED (uint8_t)0xFF
+extern FAST_RAM_ZERO_INIT int mixerActiveServos;
+extern FAST_RAM_ZERO_INIT int mixerActiveMotors;
 
-extern const mixer_t mixers[];
-extern float motor[MAX_SUPPORTED_MOTORS];
-extern float motor_disarmed[MAX_SUPPORTED_MOTORS];
-extern float motorOutputHigh, motorOutputLow;
-struct rxConfig_s;
+extern FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
 
-uint8_t getMotorCount(void);
-float getMotorMixRange(void);
-bool areMotorsRunning(void);
 
-void initEscEndpoints(void);
 void mixerInit(void);
 void mixerInitProfile(void);
-void mixerRpmSourceInit(void);
 
-void mixerConfigureOutput(void);
+void mixerUpdate(void);
 
-void mixerResetDisarmedMotors(void);
-void mixTable(timeUs_t currentTimeUs);
-void stopMotors(void);
-void writeMotors(void);
+float mixerGetInput(uint8_t i);
+float mixerGetServoOutput(uint8_t i);
+float mixerGetMotorOutput(uint8_t i);
 
-float mixerGetThrottle(void);
+float getCyclicDeflection(void);
 
-uint8_t isHeliSpooledUp(void);
-float mixerGetGovGearRatio(void);
-float mixerGetGovCollectivePulseFilterGain(void);
 
-float getHeadSpeed(void);
+#define mixerGetThrottle()      mixerGetInput(MIXER_IN_RC_THROTTLE)
 
-int calcMotorRpm(uint8_t motor, int erpm);
-int getMotorRPM(uint8_t motor);
-int getMotorRawRPM(uint8_t motor);
+#define mixerGetActiveServos()  mixerActiveServos
+#define mixerGetActiveMotors()  mixerActiveMotors
 
-bool isRpmSourceActive(void);
