@@ -32,6 +32,8 @@
 #include "common/filter.h"
 #include "common/maths.h"
 
+#include "config/feature.h"
+#include "config/config.h"
 #include "config/config_reset.h"
 
 #include "drivers/dshot_command.h"
@@ -45,12 +47,12 @@
 #include "fc/rc_controls.h"
 #include "fc/runtime_config.h"
 
-#include "flight/gps_rescue.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/rpm_filter.h"
-#include "flight/setpoint.h"
 #include "flight/servos.h"
+#include "flight/motors.h"
+#include "flight/setpoint.h"
+#include "flight/gps_rescue.h"
 
 #include "io/gps.h"
 
@@ -121,11 +123,11 @@ void resetPidProfile(pidProfile_t *pidProfile)
 {
     RESET_CONFIG(pidProfile_t, pidProfile,
         .pid = {
-            [PID_ROLL] =  { 42, 85, 35, 90 },
+            [PID_ROLL]  = { 42, 85, 35, 90 },
             [PID_PITCH] = { 46, 90, 38, 95 },
-            [PID_YAW] =   { 45, 90, 0, 90 },
+            [PID_YAW]   = { 45, 90, 0, 90 },
             [PID_LEVEL] = { 50, 50, 75, 0 },
-            [PID_MAG] =   { 40, 0, 0, 0 },
+            [PID_MAG]   = { 40, 0, 0, 0 },
         },
         .pidSumLimit = PIDSUM_LIMIT,
         .pidSumLimitYaw = PIDSUM_LIMIT_YAW,
@@ -273,7 +275,6 @@ float pidGetSpikeLimitInverse()
 {
     return ffSpikeLimitInverse;
 }
-
 
 float pidGetFfBoostFactor()
 {
@@ -465,9 +466,12 @@ typedef struct pidCoefficient_s {
 } pidCoefficient_t;
 
 static FAST_RAM_ZERO_INIT pidCoefficient_t pidCoefficient[XYZ_AXIS_COUNT];
+
 static FAST_RAM_ZERO_INIT float maxVelocity[XYZ_AXIS_COUNT];
+
 static FAST_RAM_ZERO_INIT float feedForwardTransition;
-static FAST_RAM_ZERO_INIT float levelGain, horizonGain, horizonTransition, horizonCutoffDegrees, horizonFactorRatio;
+static FAST_RAM_ZERO_INIT float levelGain;
+static FAST_RAM_ZERO_INIT float horizonGain, horizonTransition, horizonCutoffDegrees, horizonFactorRatio;
 static FAST_RAM_ZERO_INIT float itermWindupPointInv;
 static FAST_RAM_ZERO_INIT uint8_t horizonTiltExpertMode;
 static FAST_RAM_ZERO_INIT float itermLimit;
@@ -537,13 +541,16 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     pidCoefficient[FD_YAW].Kf = YAW_FF_SCALE    * pidProfile->pid[FD_YAW].F;
 
     levelGain = pidProfile->pid[PID_LEVEL].P / 10.0f;
+    
     horizonGain = pidProfile->pid[PID_LEVEL].I / 10.0f;
     horizonTransition = (float)pidProfile->pid[PID_LEVEL].D;
     horizonTiltExpertMode = pidProfile->horizon_tilt_expert_mode;
     horizonCutoffDegrees = (175 - pidProfile->horizon_tilt_effect) * 1.8f;
     horizonFactorRatio = (100 - pidProfile->horizon_tilt_effect) * 0.01f;
+
     maxVelocity[FD_ROLL] = maxVelocity[FD_PITCH] = pidProfile->rateAccelLimit * 100 * dT;
     maxVelocity[FD_YAW] = pidProfile->yawRateAccelLimit * 100 * dT;
+
     itermWindupPointInv = 1.0f;
     if (pidProfile->itermWindupPointPercent < 100) {
         const float itermWindupPoint = pidProfile->itermWindupPointPercent / 100.0f;
@@ -608,6 +615,7 @@ void pidInitConfig(const pidProfile_t *pidProfile)
         thrustLinearizationB = (1.0f - thrustLinearization) / (2.0f * thrustLinearization);
     }
 #endif
+
 #ifdef USE_INTERPOLATED_SP
     ffFromInterpolatedSetpoint = pidProfile->ff_interpolate_sp;
     ffSmoothFactor = 1.0f - ((float)pidProfile->ff_smooth_factor) / 100.0f;
@@ -622,9 +630,6 @@ void pidInit(const pidProfile_t *pidProfile)
     pidSetTargetLooptime(gyro.targetLooptime); // Initialize pid looptime
     pidInitFilters(pidProfile);
     pidInitConfig(pidProfile);
-#ifdef USE_RPM_FILTER
-    rpmFilterInit(rpmFilterConfig());
-#endif
 }
 
 #ifdef USE_ACRO_TRAINER
@@ -870,6 +875,7 @@ static float accelerationLimit(int axis, float currentPidSetpoint)
     }
 
     previousSetpoint[axis] = currentPidSetpoint;
+
     return currentPidSetpoint;
 }
 
@@ -1131,8 +1137,6 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
 #endif
 
 
-// Betaflight pid controller, which will be maintained in the future with additional features specialised for current (mini) multirotor usage.
-// Based on 2DOF reference design (matlab)
 void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTimeUs)
 {
     static float previousGyroRateDterm[XYZ_AXIS_COUNT];
@@ -1171,10 +1175,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     } else {
         levelModeStartTimeUs = 0;
     }
+    
     gpsRescuePreviousState = gpsRescueIsActive;
 #endif
 
-    // Precalculate gyro deta for D-term here, this allows loop unrolling
+    // Precalculate gyro delta for D-term here, this allows loop unrolling
     float gyroRateDterm[XYZ_AXIS_COUNT];
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
         gyroRateDterm[axis] = gyro.gyroADCf[axis];
@@ -1206,17 +1211,15 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         if (maxVelocity[axis]) {
             currentPidSetpoint = accelerationLimit(axis, currentPidSetpoint);
         }
+        
         // Yaw control is GYRO based, direct sticks control is applied to rate PID
 #if defined(USE_ACC)
         switch (levelMode) {
         case LEVEL_MODE_OFF:
-
             break;
         case LEVEL_MODE_R:
-            if (axis == FD_PITCH) {
+            if (axis == FD_PITCH)
                 break;
-            }
-
             FALLTHROUGH;
         case LEVEL_MODE_RP:
             if (axis == FD_YAW) {
@@ -1245,10 +1248,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         }
 
         // -----calculate error rate
-        const float gyroRate = gyro.gyroADCf[axis]; // Process variable from gyro output in deg/sec
-        float errorRate = currentPidSetpoint - gyroRate; // r - y
+        const float gyroRate = gyro.gyroADCf[axis];
+        float errorRate = currentPidSetpoint - gyroRate;
+        
         const float previousIterm = pidData[axis].I;
         float itermErrorRate = errorRate;
+
 #ifdef USE_ABSOLUTE_CONTROL
         float uncorrectedSetpoint = currentPidSetpoint;
 #endif
@@ -1304,14 +1309,14 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #ifdef USE_INTERPOLATED_SP
         if (ffFromInterpolatedSetpoint) {
             pidSetpointDelta = interpolatedSpApply(axis, newRcFrame, ffFromInterpolatedSetpoint);
-        } else {
+        }
+        else
+#endif
+        {
             pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
         }
-#else
-        pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
-#endif
+        
         previousPidSetpoint[axis] = currentPidSetpoint;
-
 
 #ifdef USE_RC_SMOOTHING_FILTER
         pidSetpointDelta = applyRcSmoothingDerivativeFilter(axis, pidSetpointDelta);
@@ -1319,15 +1324,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // -----calculate D component
         if (pidCoefficient[axis].Kd > 0) {
-
             // Divide rate change by dT to get differential (ie dr/dt).
             // dT is fixed and calculated from the target PID loop time
             // This is done to avoid DTerm spikes that occur with dynamically
             // calculated deltaT whenever another task causes the PID
             // loop execution to be delayed.
-            const float delta =
-                - (gyroRateDterm[axis] - previousGyroRateDterm[axis]) * pidFrequency;
-
+            const float delta = (previousGyroRateDterm[axis] - gyroRateDterm[axis]) * pidFrequency;
             pidData[axis].D = pidCoefficient[axis].Kd * delta;
         } else {
             pidData[axis].D = 0;
@@ -1437,7 +1439,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             float tailBaseThrust = -1.0f * pidProfile->yawBaseThrust / 10.0f;
             
             // Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
-            float tailCyclicFF = -1.0f * servosGetCyclicDeflection() * 100.0f * pidProfile->yawCycKf / 100.0f;
+            float tailCyclicFF = -1.0f * getCyclicDeflection() * 100.0f * pidProfile->yawCycKf / 100.0f;
             
             // Main motor torque increase from the ESC is proportional to the absolute change in average voltage (NOT percent change in average voltage)
             //     and it is linear with the amount of change.
@@ -1477,6 +1479,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // calculating the PID sum
         pidData[axis].Sum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
+
+        // Limited PID sum
+        pidData[axis].SumLim = constrainf(pidData[axis].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit);
     }
 
     // Disable PID control if gyro overflow detected
@@ -1488,6 +1493,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidData[axis].D = 0;
             pidData[axis].F = 0;
             pidData[axis].Sum = 0;
+            pidData[axis].SumLim = 0;
         }
     }
 }
@@ -1507,7 +1513,8 @@ void pidSetAcroTrainerState(bool newState)
 #ifdef USE_DYN_LPF
 void dynLpfDTermUpdate(float throttle)
 {
-    static unsigned int cutoffFreq;
+    unsigned int cutoffFreq;
+    
     if (dynLpfFilter != DYN_LPF_NONE) {
         if (dynLpfCurveExpo > 0) {
             cutoffFreq = dynDtermLpfCutoffFreq(throttle, dynLpfMin, dynLpfMax, dynLpfCurveExpo);
@@ -1515,7 +1522,7 @@ void dynLpfDTermUpdate(float throttle)
             cutoffFreq = fmax(dynThrottle(throttle) * dynLpfMax, dynLpfMin);
         }
 
-         if (dynLpfFilter == DYN_LPF_PT1) {
+        if (dynLpfFilter == DYN_LPF_PT1) {
             for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
                 pt1FilterUpdateCutoff(&dtermLowpass[axis].pt1Filter, pt1FilterGain(cutoffFreq, dT));
             }
@@ -1528,10 +1535,10 @@ void dynLpfDTermUpdate(float throttle)
 }
 #endif
 
-float dynDtermLpfCutoffFreq(float throttle, uint16_t dynLpfMin, uint16_t dynLpfMax, uint8_t expo) {
-    const float expof = expo / 10.0f;
-    static float curve;
-    curve = throttle * (1 - throttle) * expof + throttle;
+float dynDtermLpfCutoffFreq(float throttle, uint16_t dynLpfMin, uint16_t dynLpfMax, uint8_t expo)
+{
+    float expof = expo / 10.0f;
+    float curve = throttle * (1 - throttle) * expof + throttle;
     return (dynLpfMax - dynLpfMin) * curve + dynLpfMin;
 }
 
