@@ -59,7 +59,6 @@ typedef struct rpmFilterBank_s
 
 
 FAST_RAM_ZERO_INIT static rpmFilterBank_t filterBank[RPM_FILTER_BANK_COUNT];
-FAST_RAM_ZERO_INIT static pt1Filter_t motorFilter[MAX_SUPPORTED_MOTORS];
 
 FAST_RAM_ZERO_INIT static uint8_t activeBankCount;
 FAST_RAM_ZERO_INIT static uint8_t currentBank;
@@ -100,15 +99,6 @@ void rpmFilterInit(const rpmFilterConfig_t *config)
             activeBankCount++;
         }
     }
-
-    if (activeBankCount > 0) {
-        float pid_dt = gyro.targetLooptime * pidConfig()->pid_process_denom * 1e-6;
-        float cutoff = 0.25 / (pid_dt * activeBankCount);
-
-        for (int motor=0; motor<getMotorCount(); motor++) {
-            pt1FilterInit(&motorFilter[motor], pt1FilterGain(cutoff, pid_dt));
-        }
-    }
 }
 
 FAST_CODE_NOINLINE float rpmFilterGyro(int axis, float value)
@@ -126,16 +116,12 @@ FAST_CODE_NOINLINE float rpmFilterGyro(int axis, float value)
 void rpmFilterUpdate()
 {
     if (activeBankCount > 0) {
-        // Loop over all the motors and low-pass filter their RPM values
-        for (int motor = 0; motor < getMotorCount(); motor++) {
-            pt1FilterApply(&motorFilter[motor], getMotorRawRPM(motor));
-        }
 
         // Update one filter bank per cycle
         rpmFilterBank_t *filt = &filterBank[currentBank];
 
         // Calculate filter frequency
-        float rpm  = motorFilter[filt->motorIndex - 1].state;
+        float rpm  = getMotorRPM(filt->motorIndex - 1);
         float freq = constrainf(rpm / filt->rpmRatio, filt->minHz, filt->maxHz);
 
         // Notches for Roll,Pitch,Yaw

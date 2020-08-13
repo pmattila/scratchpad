@@ -26,22 +26,24 @@
 #include "common/axis.h"
 #include "pg/pg.h"
 
-#define MAX_PID_PROCESS_DENOM       16
+// PID controller version id
 #define PID_CONTROLLER_BETAFLIGHT   1
-#define PID_MIXER_SCALING           1000.0f
-#define PID_SERVO_MIXER_SCALING     0.7f
+
+#define MAX_PID_PROCESS_DENOM       16
+
 #define PIDSUM_LIMIT                500
 #define PIDSUM_LIMIT_YAW            400
 #define PIDSUM_LIMIT_MIN            100
 #define PIDSUM_LIMIT_MAX            1000
 
-// Scaling factors for PIDs for better tunable range in configurator.
 #define ROLL_PTERM_SCALE	    (1.0f / 300)
 #define ROLL_ITERM_SCALE	    (1.0f / 20)
 #define ROLL_DTERM_SCALE	    (1.0f / 20000)
+
 #define PITCH_PTERM_SCALE	    (1.0f / 300)
 #define PITCH_ITERM_SCALE	    (1.0f / 20)
 #define PITCH_DTERM_SCALE	    (1.0f / 20000)
+
 #define YAW_PTERM_SCALE 	    (1.0f / 30)
 #define YAW_ITERM_SCALE 	    (1.0f / 4)
 #define YAW_DTERM_SCALE 	    (1.0f / 200)
@@ -57,6 +59,7 @@
 
 #define ITERM_ACCELERATOR_GAIN_OFF 1000
 #define ITERM_ACCELERATOR_GAIN_MAX 30000
+
 typedef enum {
     PID_ROLL,
     PID_PITCH,
@@ -199,8 +202,8 @@ typedef struct pidAxisData_s {
     float I;
     float D;
     float F;
-
     float Sum;
+    float SumLim;
 } pidAxisData_t;
 
 extern const char pidNames[];
