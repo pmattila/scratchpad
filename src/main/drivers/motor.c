@@ -32,7 +32,6 @@
 
 #include "config/feature.h"
 
-#include "drivers/dshot.h" // for DSHOT_ constants in initEscEndpoints; may be gone in the future
 #include "drivers/pwm_output.h" // for PWM_TYPE_* and others
 #include "drivers/time.h"
 #include "drivers/dshot_bitbang.h"
@@ -78,21 +77,6 @@ int motorDeviceCount(void)
     return motorDevice->count;
 }
 
-// This is not motor generic anymore; should be moved to analog pwm module
-static void analogInitEndpoints(const motorConfig_t *motorConfig, float outputLimit, float *outputLow, float *outputHigh, float *disarm, float *deadbandMotor3dHigh, float *deadbandMotor3dLow) {
-    if (false) { // HF3D: FEATURE_3D
-        float outputLimitOffset = (flight3DConfig()->limit3d_high - flight3DConfig()->limit3d_low) * (1 - outputLimit) / 2;
-        *disarm = flight3DConfig()->neutral3d;
-        *outputLow = flight3DConfig()->limit3d_low + outputLimitOffset;
-        *outputHigh = flight3DConfig()->limit3d_high - outputLimitOffset;
-        *deadbandMotor3dHigh = flight3DConfig()->deadband3d_high;
-        *deadbandMotor3dLow = flight3DConfig()->deadband3d_low;
-    } else {
-        *disarm = motorConfig->mincommand;
-        *outputLow = motorConfig->minthrottle;
-        *outputHigh = motorConfig->maxthrottle - ((motorConfig->maxthrottle - motorConfig->minthrottle) * (1 - outputLimit));
-    }
-}
 
 bool checkMotorProtocolEnabled(const motorDevConfig_t *motorDevConfig, bool *isProtocolDshot)
 {
@@ -106,7 +90,6 @@ bool checkMotorProtocolEnabled(const motorDevConfig_t *motorDevConfig, bool *isP
     case PWM_TYPE_MULTISHOT:
     case PWM_TYPE_BRUSHED:
         enabled = true;
-
         break;
 
 #ifdef USE_DSHOT
@@ -116,11 +99,9 @@ bool checkMotorProtocolEnabled(const motorDevConfig_t *motorDevConfig, bool *isP
     case PWM_TYPE_PROSHOT1000:
         enabled = true;
         isDshot = true;
-
         break;
 #endif
     default:
-
         break;
     }
 
@@ -131,26 +112,9 @@ bool checkMotorProtocolEnabled(const motorDevConfig_t *motorDevConfig, bool *isP
     return enabled;
 }
 
-static void checkMotorProtocol(const motorDevConfig_t *motorDevConfig)
+void checkMotorProtocol(const motorDevConfig_t *motorDevConfig)
 {
     motorProtocolEnabled = checkMotorProtocolEnabled(motorDevConfig, &motorProtocolDshot);
-}
-
-// End point initialization is called from mixerInit before motorDevInit; can't use vtable...
-void motorInitEndpoints(const motorConfig_t *motorConfig, float outputLimit, float *outputLow, float *outputHigh, float *disarm, float *deadbandMotor3dHigh, float *deadbandMotor3dLow)
-{
-    checkMotorProtocol(&motorConfig->dev);
-
-    if (isMotorProtocolEnabled()) {
-        if (!isMotorProtocolDshot()) {
-            analogInitEndpoints(motorConfig, outputLimit, outputLow, outputHigh, disarm, deadbandMotor3dHigh, deadbandMotor3dLow);
-        }
-#ifdef USE_DSHOT
-        else {
-            dshotInitEndpoints(motorConfig, outputLimit, outputLow, outputHigh, disarm, deadbandMotor3dHigh, deadbandMotor3dLow);
-        }
-#endif
-    }
 }
 
 float motorConvertFromExternal(uint16_t externalValue)
@@ -254,9 +218,8 @@ bool isMotorProtocolDshot(void)
     return motorProtocolDshot;
 }
 
-void motorDevInit(const motorDevConfig_t *motorDevConfig, uint16_t idlePulse, uint8_t motorCount) {
-    memset(motors, 0, sizeof(motors));
-
+void motorDevInit(const motorDevConfig_t *motorDevConfig, uint16_t idlePulse, uint8_t motorCount)
+{
     bool useUnsyncedPwm = motorDevConfig->useUnsyncedPwm;
 
     if (isMotorProtocolEnabled()) {
