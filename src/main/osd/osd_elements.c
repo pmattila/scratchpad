@@ -983,7 +983,7 @@ static void osdElementMotorDiagnostics(osdElementParms_t *element)
     const bool motorsRunning = areMotorsRunning();
     for (; i < getMotorCount(); i++) {
         if (motorsRunning) {
-            element->buff[i] =  0x88 - scaleRange(motor[i], motorOutputLow, motorOutputHigh, 0, 8);
+            element->buff[i] =  0x88 - scaleRange(motorOutput[i], motorOutputLow, motorOutputHigh, 0, 8);
         } else {
             element->buff[i] =  0x88;
         }
