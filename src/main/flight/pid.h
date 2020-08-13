@@ -28,8 +28,10 @@
 
 #define MAX_PID_PROCESS_DENOM       16
 #define PID_CONTROLLER_BETAFLIGHT   1
+
 #define PID_MIXER_SCALING           1000.0f
 #define PID_SERVO_MIXER_SCALING     0.7f
+
 #define PIDSUM_LIMIT                500
 #define PIDSUM_LIMIT_YAW            400
 #define PIDSUM_LIMIT_MIN            100
@@ -57,6 +59,7 @@
 
 #define ITERM_ACCELERATOR_GAIN_OFF 1000
 #define ITERM_ACCELERATOR_GAIN_MAX 30000
+
 typedef enum {
     PID_ROLL,
     PID_PITCH,
@@ -199,8 +202,8 @@ typedef struct pidAxisData_s {
     float I;
     float D;
     float F;
-
     float Sum;
+    float SumLim;
 } pidAxisData_t;
 
 extern const char pidNames[];
