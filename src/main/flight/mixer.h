@@ -84,8 +84,10 @@ typedef struct mixer_s
 PG_DECLARE_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules);
 
 
-extern int mixerActiveServos;
-extern int mixerActiveMotors;
+extern FAST_RAM_ZERO_INIT int mixerActiveServos;
+extern FAST_RAM_ZERO_INIT int mixerActiveMotors;
+
+extern FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
 
 
 void mixerInit(void);

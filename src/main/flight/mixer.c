@@ -51,20 +51,19 @@
 PG_REGISTER_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules, PG_HELI_MIXER, 0);
 
 
-int mixerActiveServos = 0;
-int mixerActiveMotors = 0;
+FAST_RAM_ZERO_INIT int mixerActiveServos = 0;
+FAST_RAM_ZERO_INIT int mixerActiveMotors = 0;
 
-static FAST_RAM_ZERO_INIT uint8_t mixerRuleCount;
+FAST_RAM_ZERO_INIT uint8_t mixerRuleCount;
+FAST_RAM_ZERO_INIT mixer_t mixer[MIXER_RULE_COUNT];
 
-static FAST_RAM_ZERO_INIT mixer_t mixer[MIXER_RULE_COUNT];
+FAST_RAM_ZERO_INIT float mixerInput[MIXER_INPUT_COUNT];
+FAST_RAM_ZERO_INIT float mixerOutput[MIXER_OUTPUT_COUNT];
 
-static FAST_RAM_ZERO_INIT float mixerInput[MIXER_INPUT_COUNT];
-static FAST_RAM_ZERO_INIT float mixerOutput[MIXER_OUTPUT_COUNT];
+FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
 
-static FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
-
-static FAST_RAM_ZERO_INIT float cyclicTotal = 0;
-static FAST_RAM_ZERO_INIT float cyclicLimit = 1;
+FAST_RAM_ZERO_INIT float cyclicTotal = 0;
+FAST_RAM_ZERO_INIT float cyclicLimit = 1;
 
 
 void mixerInit(void)
