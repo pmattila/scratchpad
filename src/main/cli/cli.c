@@ -2129,7 +2129,44 @@ static void cliMixer(const char *cmdName, char *cmdline)
         printMixerRules(DUMP_MASTER, mixerRules(0), NULL, NULL);
     } else if (strncasecmp(cmdline, "reset", 5) == 0) {
         memset(mixerRules_array(), 0, sizeof(*mixerRules_array()));
-    } else {
+    } else if (strncasecmp(cmdline, "override", 8) == 0) {
+        int index, value, check = 0;
+        char *saveptr, *ptr;
+        ptr = strtok_r(cmdline, " ", &saveptr);
+        if (ptr) {
+            if (strncasecmp(ptr, "all", 3) == 0) {
+                index = 0;
+            } else {
+                index = atoi(ptr);
+            }
+            check++;
+            ptr = strtok_r(NULL, " ", &saveptr);
+            if (ptr) {
+                if (strncasecmp(ptr, "off", 3) == 0) {
+                    value = MIXER_OVERRIDE_OFF;
+                } else {
+                    value = atoi(ptr);
+                }
+                check++;
+            }
+        }
+        if (check != 2) {
+            cliShowInvalidArgumentCountError(cmdName);
+            return;
+        }
+        if (index < INPUT_SOURCE_NONE || index >= INPUT_SOURCE_COUNT ||
+            value < -1000 || value > 1001) {
+            cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            return;
+        }
+        if (index == INPUT_SOURCE_NONE) {
+            for (int i=1; i<INPUT_SOURCE_COUNT; i++)
+                mixerOverride[i] = value;
+        } else {
+            mixerOverride[index] = value;
+        }
+    }
+    else {
         enum {RULE = 0, OPER, INPUT, OUTPUT, OFFSET, RATE, MIN, MAX, ARGS_COUNT};
         int args[ARGS_COUNT];
         int check = 0;
@@ -2170,62 +2207,6 @@ static void cliMixer(const char *cmdName, char *cmdline)
     }
 }
 
-#ifdef TODO
-static void cliMixerInputOverride(const char *cmdName, char *cmdline)
-{
-    if (isEmpty(cmdline)) {
-        printMixerInputOverride(cmdName, cmdLine);
-        return;
-    }
-
-    int inputIndex = 0;
-    int overrideValue = 0;
-
-    char *saveptr;
-    char *pch = strtok_r(cmdline, " ", &saveptr);
-    int index = 0;
-    while (pch != NULL) {
-        switch (index) {
-        case 0:
-            if (strcasestr(pch, "on")) {
-                servo_input_override[4] = 1;
-                return;
-            } else if (strcasestr(pch, "off")) {
-                servo_input_override[4] = 0;
-                return;
-            }
-
-            inputIndex = atoi(pch);
-            if ((inputIndex >= 0) && (inputIndex <= 3)) {
-                cliPrintLinef("Setting servo input override for %d.", inputIndex);
-            } else {
-                cliPrintErrorLinef(cmdName, "INVALID SERVO INPUT CHANNEL. RANGE: 0 - 3.");
-                return;
-            }
-            break;
-
-        case 1:
-            overrideValue = atoi(pch);
-            break;
-        }
-        index++;
-        pch = strtok_r(NULL, " ", &saveptr);
-    }
-
-    if (index == 2) {
-        if (overrideValue < -1000 || overrideValue > 1000) {
-            cliShowArgumentRangeError(cmdName, "VALUE", -1000, 1000);
-        } else {
-            servo_input_override[inputIndex] = overrideValue;
-            cliPrintLinef("input override value for input %d set to: %d", inputIndex, overrideValue);
-        }
-    } else {
-        // Print out the current input override setting if no position given (255 = all servos print)
-        cliPrintLinef("input override value for input %d: %d", inputIndex, servo_input_override[inputIndex]);
-        //cliShowParseError();
-    }
-}
-#endif
 
 #ifdef USE_SDCARD
 
