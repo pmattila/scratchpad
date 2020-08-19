@@ -92,10 +92,16 @@ void mixerInitProfile(void)
 
 void mixerUpdate(void)
 {
-    mixerInput[INPUT_STABILIZED_ROLL]  = constrainf(pidData[FD_ROLL].Sum,  -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
-    mixerInput[INPUT_STABILIZED_PITCH] = constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
-    mixerInput[INPUT_STABILIZED_YAW]   = constrainf(pidData[FD_YAW].Sum,   -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
-
+    if (FLIGHT_MODE(PASSTHRU_MODE)) {
+        mixerInput[INPUT_STABILIZED_ROLL]  = rcCommand[ROLL];
+        mixerInput[INPUT_STABILIZED_PITCH] = rcCommand[PITCH];
+        mixerInput[INPUT_STABILIZED_YAW]   = rcCommand[YAW];
+    } else {
+        mixerInput[INPUT_STABILIZED_ROLL]  = constrainf(pidData[FD_ROLL].Sum,  -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+        mixerInput[INPUT_STABILIZED_PITCH] = constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+        mixerInput[INPUT_STABILIZED_YAW]   = constrainf(pidData[FD_YAW].Sum,   -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+    }
+    
     mixerInput[INPUT_STABILIZED_COLLECTIVE]  = rcCommand[COLLECTIVE];
     
     mixerInput[INPUT_GOVERNOR_MAIN] = govOutput[0];
