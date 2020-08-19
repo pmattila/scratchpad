@@ -38,15 +38,11 @@ enum {
     INPUT_RC_AUX2,
     INPUT_RC_AUX3,
     INPUT_RC_AUX4,
-    INPUT_GIMBAL_PITCH,
-    INPUT_GIMBAL_ROLL,
     INPUT_SOURCE_COUNT
 };
 
 // target servo channels
 typedef enum {
-    SERVO_GIMBAL_PITCH = 0,
-    SERVO_GIMBAL_ROLL = 1,
     SERVO_FLAPS = 2,
     SERVO_FLAPPERON_1 = 3,
     SERVO_FLAPPERON_2 = 4,
