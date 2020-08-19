@@ -120,7 +120,7 @@ void governorUpdate(void)
 
         // Calculate headspeed
         headspeed = getMotorRPM(0) / govGearRatio;
-        
+
         // Some logic to help us come back from a stage 1 failsafe / glitch / RPM loss / accidental throttle hold quickly
         // We're going to use this time to lock in our spooledUp state for a few seconds after throttle = 0 when we were just spooledUp on the last pass through
         // Also gives us a few second window if we lose headspeed signal... in that case we'll fall back to the commanded throttle value
@@ -286,7 +286,8 @@ void governorUpdate(void)
             
             // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
             govI = constrainf(govI + govKi * govError * pidGetDT(), -50.0f, 50.0f);
-            
+
+            // Governor PID sum
             govPidSum = govP + govI;
 
             
@@ -294,7 +295,7 @@ void governorUpdate(void)
             //  Note:  This should NOT apply to the tail feedforward compensations that go into the PID controller!
             //         Those compensations are related to the amount of TORQUE only... and this comp would be trying
             //            to keep torque equal, so those shouldn't have to change.
-            
+
             // Generate our new governed throttle signal
             govMain = govBaseThrottle + govCollectiveFF + govCollectivePulseFF + govCyclicFF + govPidSum;
 
@@ -313,7 +314,6 @@ void governorUpdate(void)
                 if (govError < 0.0f) {
                     govI -= govKi * govError * pidGetDT();
                 }
-
                 govMain = 0.0f;
             }
 
@@ -327,14 +327,14 @@ void governorUpdate(void)
             //    This means the base throttle will be ramped way up if then go back towards a lower average pitch... is that a problem?
             //float govBaseThrottleChange = (throttle - govBaseThrottle) * govBaseThrottleFilterGain;
             //govBaseThrottle += govBaseThrottleChange;
+
             // Adjust the I-term to account for the base throttle adjustment we just made
             // HF3D TODO:  What if I-term was at contraints before we did this?
             //govI -= govBaseThrottleChange;
+ 
 
             // Set lastSpoolThrottle to track the governor throttle signal when the governor is active
             lastSpoolThrottle = govMain;
-
-            //DEBUG_SET(DEBUG_GOVERNOR, 2, govPidSum*1000.0f);             // Max pidsum will be around 1, so increase by 1000x
         }
 
         
@@ -344,6 +344,7 @@ void governorUpdate(void)
         if ((governorConfig()->gov_spoolup_time == 0) && (ARMING_FLAG(ARMED))) {
             govMain = throttle;
         }
+
 
         DEBUG_SET(DEBUG_GOVERNOR, 0, govSetpointLimited);
         DEBUG_SET(DEBUG_GOVERNOR, 1, headspeed);
@@ -369,6 +370,7 @@ void governorUpdate(void)
             // Track the main motor output while spooling up so that we don't have our tail motor going nuts at zero throttle
             govTail *= govMain;
         }
+
 #ifdef USE_THRUST_LINEARIZATION
         // Scale PID sums and throttle to linearize the system (thrust varies with rpm^2)
         //   https://github.com/betaflight/betaflight/pull/7304
@@ -378,7 +380,6 @@ void governorUpdate(void)
         govOutput[1] = govTail;
 
     }  // end of tail motor handling
-    
 }
 
 
