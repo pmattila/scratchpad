@@ -47,8 +47,6 @@
 #include "flight/pid.h"
 #include "flight/servos.h"
 
-#include "io/gimbal.h"
-
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 #include "pg/rx.h"
@@ -87,9 +85,6 @@ void pgResetFn_servoParams(servoParam_t *instance)
         );
     }
 }
-
-// no template required since default is zero
-PG_REGISTER(gimbalConfig_t, gimbalConfig, PG_GIMBAL_CONFIG, 0);
 
 int16_t servo[MAX_SUPPORTED_SERVOS];
 
@@ -171,12 +166,6 @@ static void writeServoWithTracking(uint8_t index, servoIndex_e servoname)
     servoWritten |= (1 << servoname);
 }
 
-static void updateGimbalServos(uint8_t firstServoIndex)
-{
-    writeServoWithTracking(firstServoIndex + 0, SERVO_GIMBAL_PITCH);
-    writeServoWithTracking(firstServoIndex + 1, SERVO_GIMBAL_ROLL);
-}
-
 static void servoTable(void);
 static void filterServos(void);
 
@@ -190,12 +179,6 @@ void writeServos(void)
     // HF3D: Legacy...
     for (int i = SERVO_HELI_FIRST; i <= SERVO_HELI_LAST; i++) {
         writeServoWithTracking(servoIndex++, i);
-    }
-
-    // Two servos for SERVO_TILT, if enabled
-    if (featureIsEnabled(FEATURE_SERVO_TILT)) {
-        updateGimbalServos(servoIndex);
-        servoIndex += 2;
     }
 
     // Scan servos and write those marked forwarded and not written yet
@@ -238,9 +221,6 @@ void servoMixer(void)
         // NOTE:  WIth servo mixer scaling applied to yaw, it means that a pidSum of 1428 (143% in BB Explorer) is needed to max out the yaw channel.
         input[INPUT_STABILIZED_YAW] = pidData[FD_YAW].Sum * PID_SERVO_MIXER_SCALING;
     }
-
-    input[INPUT_GIMBAL_PITCH] = scaleRange(attitude.values.pitch, -1800, 1800, -500, +500);
-    input[INPUT_GIMBAL_ROLL] = scaleRange(attitude.values.roll, -1800, 1800, -500, +500);
 
     input[INPUT_STABILIZED_THROTTLE] = motor[0] - 1000 - 500;  // Since it derives from rcCommand or mincommand and must be [-500:+500]
     input[INPUT_STABILIZED_COLLECTIVE] = rcCommand[COLLECTIVE];
@@ -323,23 +303,6 @@ void servoMixer(void)
 static void servoTable(void)
 {
     servoMixer();
-
-    // camera stabilization
-    if (featureIsEnabled(FEATURE_SERVO_TILT)) {
-        // center at fixed position, or vary either pitch or roll by RC channel
-        servo[SERVO_GIMBAL_PITCH] = determineServoMiddleOrForwardFromChannel(SERVO_GIMBAL_PITCH);
-        servo[SERVO_GIMBAL_ROLL] = determineServoMiddleOrForwardFromChannel(SERVO_GIMBAL_ROLL);
-
-        if (IS_RC_MODE_ACTIVE(BOXCAMSTAB)) {
-            if (gimbalConfig()->mode == GIMBAL_MODE_MIXTILT) {
-                servo[SERVO_GIMBAL_PITCH] -= (-(int32_t)servoParams(SERVO_GIMBAL_PITCH)->rate) * attitude.values.pitch / 50 - (int32_t)servoParams(SERVO_GIMBAL_ROLL)->rate * attitude.values.roll / 50;
-                servo[SERVO_GIMBAL_ROLL] += (-(int32_t)servoParams(SERVO_GIMBAL_PITCH)->rate) * attitude.values.pitch / 50 + (int32_t)servoParams(SERVO_GIMBAL_ROLL)->rate * attitude.values.roll / 50;
-            } else {
-                servo[SERVO_GIMBAL_PITCH] += (int32_t)servoParams(SERVO_GIMBAL_PITCH)->rate * attitude.values.pitch / 50;
-                servo[SERVO_GIMBAL_ROLL] += (int32_t)servoParams(SERVO_GIMBAL_ROLL)->rate * attitude.values.roll  / 50;
-            }
-        }
-    }
 
     // constrain servos
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
