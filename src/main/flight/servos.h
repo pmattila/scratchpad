@@ -27,11 +27,11 @@
 #define DEFAULT_SERVO_CENTER  1500
 
 typedef struct servoParam_s {
-    int16_t rate;   // range [-1000;+1000] ; can be used to adjust a rate 0-2000%% and a direction
-    int16_t mid;    // servo midpoint
     int16_t min;    // servo min
     int16_t max;    // servo max
-    int16_t lpf;    // low pass filter freq
+    int16_t mid;    // servo midpoint
+    int16_t rate;   // range [-1000;+1000] ; can be used to adjust a rate 0-2000%% and a direction
+    int16_t freq;   // low pass filter freq
 } servoParam_t;
 
 PG_DECLARE_ARRAY(servoParam_t, MAX_SUPPORTED_SERVOS, servoParams);
