@@ -1987,20 +1987,20 @@ static void printServo(dumpFlags_t dumpMask, const servoParam_t *servoParams, co
             headingStr = cliPrintSectionHeading(dumpMask, !equalsDefault, headingStr);
             cliDefaultPrintLinef(dumpMask, equalsDefault, format,
                 i,
-                defaultServoConf->rate,
-                defaultServoConf->mid,
                 defaultServoConf->min,
                 defaultServoConf->max,
-                defaultServoConf->lpf
+                defaultServoConf->mid,
+                defaultServoConf->rate,
+                defaultServoConf->freq
             );
         }
         cliDumpPrintLinef(dumpMask, equalsDefault, format,
             i,
-            servoConf->rate,
-            servoConf->mid,
             servoConf->min,
             servoConf->max,
-            servoConf->lpf
+            servoConf->mid,
+            servoConf->rate,
+            servoConf->freq
         );
     }
 }
@@ -2015,8 +2015,8 @@ static void cliServo(const char *cmdName, char *cmdline)
     if (isEmpty(cmdline)) {
         printServo(DUMP_MASTER, servoParams(0), NULL, NULL);
     } else {
-        enum { INDEX = 0, RATE, MID, MIN, MAX, LPF, ARGS_COUNT };
-        int16_t arguments[ARGS_COUNT];
+        enum { INDEX = 0, MIN, MAX, MID, RATE, FREQ, ARGS_COUNT };
+        int16_t args[ARGS_COUNT];
         int validArgumentCount = 0;
 
         ptr = cmdline;
@@ -2031,7 +2031,7 @@ static void cliServo(const char *cmdName, char *cmdline)
                     return;
                 }
 
-                arguments[validArgumentCount++] = atoi(ptr);
+                args[validArgumentCount++] = atoi(ptr);
 
                 do {
                     ptr++;
@@ -2044,7 +2044,7 @@ static void cliServo(const char *cmdName, char *cmdline)
             }
         }
 
-        i = arguments[INDEX];
+        i = args[INDEX];
 
         // Check we got the right number of args and the servo index is correct (don't validate the other values)
         if (validArgumentCount != ARGS_COUNT || i < 0 || i >= MAX_SUPPORTED_SERVOS) {
@@ -2055,30 +2055,30 @@ static void cliServo(const char *cmdName, char *cmdline)
         servo = servoParamsMutable(i);
 
         if (
-            arguments[RATE] < -1000 || arguments[RATE] > 1000 ||
-            arguments[MIN] > arguments[MAX] || arguments[MAX] < arguments[MIN] ||
-            arguments[MIN] < PWM_SERVO_PULSE_MIN || arguments[MIN] > PWM_SERVO_PULSE_MAX ||
-            arguments[MAX] < PWM_SERVO_PULSE_MIN || arguments[MAX] > PWM_SERVO_PULSE_MAX ||
-            arguments[MID] < arguments[MIN] || arguments[MID] > arguments[MAX] ||
-            arguments[LPF] < 0 || arguments[LPF] > 500
+            args[MIN] > args[MAX] ||
+            args[MIN] < PWM_SERVO_PULSE_MIN || args[MIN] > PWM_SERVO_PULSE_MAX ||
+            args[MAX] < PWM_SERVO_PULSE_MIN || args[MAX] > PWM_SERVO_PULSE_MAX ||
+            args[MID] < args[MIN] || args[MID] > args[MAX] ||
+            args[RATE] < -1000 || args[RATE] > 1000 ||
+            args[FREQ] < -1 || args[FREQ] > 500
         ) {
             cliShowArgumentRangeError(cmdName, NULL, 0, 0);
             return;
         }
 
-        servo->rate = arguments[RATE];
-        servo->mid = arguments[MID];
-        servo->min = arguments[MIN];
-        servo->max = arguments[MAX];
-        servo->lpf = arguments[LPF];
+        servo->min = args[MIN];
+        servo->max = args[MAX];
+        servo->mid = args[MID];
+        servo->rate = args[RATE];
+        servo->freq = args[FREQ];
 
         cliDumpPrintLinef(0, false, format,
             i,
-            servo->rate,
-            servo->mid,
             servo->min,
             servo->max,
-            servo->lpf
+            servo->mid,
+            servo->rate,
+            servo->freq
         );
     }
 }

@@ -72,11 +72,11 @@ void pgResetFn_servoParams(servoParam_t *instance)
 {
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         RESET_CONFIG(servoParam_t, &instance[i],
-                     .rate = 1000,
-                     .mid  = DEFAULT_SERVO_CENTER,
                      .min  = DEFAULT_SERVO_MIN,
                      .max  = DEFAULT_SERVO_MAX,
-                     .lpf  = 0,
+                     .mid  = DEFAULT_SERVO_CENTER,
+                     .rate = 1000,
+                     .freq = 0,
         );
     }
 }
@@ -86,8 +86,8 @@ void servoInit(void)
     servoDevInit(&servoConfig()->dev);
     
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
-        if (servoParams(i)->lpf) {
-            biquadFilterInitLPF(&servoFilter[i], servoParams(i)->lpf, targetPidLooptime);
+        if (servoParams(i)->freq > 0) {
+            biquadFilterInitLPF(&servoFilter[i], servoParams(i)->freq, targetPidLooptime);
         }
     }
 }
@@ -99,7 +99,7 @@ void servoUpdate(void)
         // Convert mixer output -1..1 to PWM 1000..2000
         int pwm = servoParams(i)->mid + mixerGetServoOutput(i) * servoParams(i)->rate;
 
-        if (servoParams(i)->lpf > 0)
+        if (servoParams(i)->freq > 0)
             pwm = lrintf(biquadFilterApply(&servoFilter[i], pwm));
         
         servo[i] = constrain(pwm, servoParams(i)->min, servoParams(i)->max);
