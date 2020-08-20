@@ -100,9 +100,9 @@ void mixerUpdate(void)
         mixerInput[MIXER_IN_STABILIZED_PITCH] = rcCommand[PITCH];
         mixerInput[MIXER_IN_STABILIZED_YAW]   = rcCommand[YAW];
     } else {
-        mixerInput[MIXER_IN_STABILIZED_ROLL]  = constrainf(pidData[FD_ROLL].Sum,  -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
-        mixerInput[MIXER_IN_STABILIZED_PITCH] = constrainf(pidData[FD_PITCH].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
-        mixerInput[MIXER_IN_STABILIZED_YAW]   = constrainf(pidData[FD_YAW].Sum,   -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+        mixerInput[MIXER_IN_STABILIZED_ROLL]  = pidData[FD_ROLL].SumLim  * PID_MIXER_SCALING;
+        mixerInput[MIXER_IN_STABILIZED_PITCH] = pidData[FD_PITCH].SumLim * PID_MIXER_SCALING;
+        mixerInput[MIXER_IN_STABILIZED_YAW]   = pidData[FD_YAW].SumLim   * PID_MIXER_SCALING;
     }
     
     mixerInput[MIXER_IN_STABILIZED_COLLECTIVE]  = rcCommand[COLLECTIVE];
@@ -119,7 +119,7 @@ void mixerUpdate(void)
     for (int i = 0; i < 8; i++)
         mixerInput[MIXER_IN_RC_AUX1+i] = rcData[AUX1+i] - rxConfig()->midrc;
 
-    // Current cyclic deflection and limit
+    // Current cyclic deflection
     cyclicTotal = sqrt(mixerInput[MIXER_IN_STABILIZED_ROLL] * mixerInput[MIXER_IN_STABILIZED_ROLL] +
                        mixerInput[MIXER_IN_STABILIZED_PITCH] * mixerInput[MIXER_IN_STABILIZED_PITCH]);
 
