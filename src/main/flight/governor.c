@@ -362,7 +362,7 @@ void governorUpdate(void)
     if (getMotorCount() > 1) {
 
         // motorMix for tail motor should be 100% stabilized yaw channel
-        float govTail = constrainf(pidData[FD_YAW].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit) * PID_MIXER_SCALING;
+        float govTail = pidData[FD_YAW].SumLim * PID_MIXER_SCALING;
         
         //  For a tail motor.. we don't really want it spinning like crazy from base thrust anytime we're armed,
         //   so tone it down a bit using the main motor throttle as a gain until we're at half our throttle setting or something.

@@ -32,6 +32,8 @@
 #include "common/filter.h"
 #include "common/maths.h"
 
+#include "config/feature.h"
+#include "config/config.h"
 #include "config/config_reset.h"
 
 #include "drivers/dshot_command.h"
@@ -638,9 +640,6 @@ void pidInit(const pidProfile_t *pidProfile)
     pidSetTargetLooptime(gyro.targetLooptime); // Initialize pid looptime
     pidInitFilters(pidProfile);
     pidInitConfig(pidProfile);
-#ifdef USE_RPM_FILTER
-    rpmFilterInit(rpmFilterConfig());
-#endif
 }
 
 #ifdef USE_ACRO_TRAINER
@@ -1490,6 +1489,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // calculating the PID sum
         pidData[axis].Sum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
+
+        // Limited PID sum
+        pidData[axis].SumLim = constrainf(pidData[axis].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit);
     }
 
     // Disable PID control if at zero throttle or if gyro overflow detected
@@ -1502,6 +1504,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidData[axis].D = 0;
             pidData[axis].F = 0;
             pidData[axis].Sum = 0;
+            pidData[axis].SumLim = 0;
         }
     } else if (zeroThrottleItermReset) {
         pidResetIterm();
