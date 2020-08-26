@@ -639,8 +639,7 @@ bool processRx(timeUs_t currentTimeUs)
     if (ARMING_FLAG(ARMED)
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
-        && !runawayTakeoffTemporarilyDisabled
-        && !isFixedWing()) {
+        && !runawayTakeoffTemporarilyDisabled) {
 
         // Determine if we're in "flight"
         //   - motors running
@@ -703,7 +702,6 @@ bool processRx(timeUs_t currentTimeUs)
     const timeUs_t autoDisarmDelayUs = armingConfig()->auto_disarm_delay * 1e6;
     if (ARMING_FLAG(ARMED)
         && featureIsEnabled(FEATURE_MOTOR_STOP)
-        && !isFixedWing()
         && !FLIGHT_MODE(GPS_RESCUE_MODE)  // disable auto-disarm when GPS Rescue is active
     ) {
         if (isUsingSticksForArming()) {
@@ -838,10 +836,6 @@ bool processRx(timeUs_t currentTimeUs)
         DISABLE_FLIGHT_MODE(PASSTHRU_MODE);
     }
 
-    if (mixerConfig()->mixerMode == MIXER_FLYING_WING || mixerConfig()->mixerMode == MIXER_AIRPLANE) {
-        DISABLE_FLIGHT_MODE(HEADFREE_MODE);
-    }
-
 #ifdef USE_TELEMETRY
     if (featureIsEnabled(FEATURE_TELEMETRY)) {
         bool enableSharedPortTelemetry = (!isModeActivationConditionPresent(BOXTELEMETRY) && ARMING_FLAG(ARMED)) || (isModeActivationConditionPresent(BOXTELEMETRY) && IS_RC_MODE_ACTIVE(BOXTELEMETRY));
@@ -886,7 +880,6 @@ static FAST_CODE void subTaskPidController(timeUs_t currentTimeUs)
     // and gyro rate for any axis is above the limit for at least the activate delay period.
     // If so, disarm for safety
     if (ARMING_FLAG(ARMED)
-        && !isFixedWing()
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
         && !runawayTakeoffTemporarilyDisabled
@@ -1008,16 +1001,7 @@ static FAST_CODE_NOINLINE void subTaskRcCommand(timeUs_t currentTimeUs)
     // If we're armed, at minimum throttle, and we do arming via the
     // sticks, do not process yaw input from the rx.  We do this so the
     // motors do not spin up while we are trying to arm or disarm.
-    // Allow yaw control for tricopters if the user wants the servo to move even when unarmed.
-    if (isUsingSticksForArming() && rcData[THROTTLE] <= rxConfig()->mincheck
-#ifndef USE_QUAD_MIXER_ONLY
-#ifdef USE_SERVOS
-                && !((mixerConfig()->mixerMode == MIXER_TRI || mixerConfig()->mixerMode == MIXER_CUSTOM_TRI) && servoConfig()->tri_unarmed_servo)
-#endif
-                && mixerConfig()->mixerMode != MIXER_AIRPLANE
-                && mixerConfig()->mixerMode != MIXER_FLYING_WING
-#endif
-    ) {
+    if (isUsingSticksForArming() && rcData[THROTTLE] <= rxConfig()->mincheck) {
         resetYawAxis();
     }
 
