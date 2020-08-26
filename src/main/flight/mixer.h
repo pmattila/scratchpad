@@ -51,6 +51,14 @@ typedef struct mixer_s {
 
 typedef struct mixerConfig_s {
     bool yaw_motors_reversed;
+    uint16_t gov_max_headspeed;
+    uint16_t gov_gear_ratio;
+    uint16_t gov_p_gain;
+    uint16_t gov_i_gain;
+    uint16_t gov_cyclic_ff_gain;
+    uint16_t gov_collective_ff_gain;
+    uint16_t gov_collective_ff_impulse_gain;
+    uint16_t spoolup_time;
 } mixerConfig_t;
 
 PG_DECLARE(mixerConfig_t, mixerConfig);
@@ -79,3 +87,9 @@ void stopMotors(void);
 void writeMotors(void);
 
 float mixerGetThrottle(void);
+
+uint8_t isHeliSpooledUp(void);
+float mixerGetGovGearRatio(void);
+float mixerGetGovCollectivePulseFilterGain(void);
+float mixerGetHeadSpeed(void);
+
