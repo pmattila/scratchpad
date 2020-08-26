@@ -59,8 +59,6 @@
 #include "flight/failsafe.h"
 #include "flight/mixer.h"
 #include "flight/pid.h"
-#include "flight/rpm_filter.h"
-#include "flight/servos.h"
 
 #include "io/beeper.h"
 #include "io/gps.h"
@@ -240,12 +238,12 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"motor",       6, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_7)},
     {"motor",       7, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_8)},
 
-    /* Helicopter servos when using MIXER_CUSTOM_AIRPLANE */
+    /* Helicopter servos */
     // Ipredict set to Zero for now due to mix of 1500/760uS servos
+    {"servo",       0, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
+    {"servo",       1, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"servo",       2, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"servo",       3, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
-    {"servo",       4, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
-    {"servo",       5, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
 
     {"headspeed",  -1, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
 };
@@ -627,10 +625,10 @@ static void writeIntraframe(void)
     }
 
     // Write the servo I frames as unsigned since they will always be somewhere between 0 and 2020
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[0]);
+    blackboxWriteUnsignedVB(blackboxCurrent->servo[1]);
     blackboxWriteUnsignedVB(blackboxCurrent->servo[2]);
     blackboxWriteUnsignedVB(blackboxCurrent->servo[3]);
-    blackboxWriteUnsignedVB(blackboxCurrent->servo[4]);
-    blackboxWriteUnsignedVB(blackboxCurrent->servo[5]);
 
     // Write helicopter headspeed
     blackboxWriteUnsignedVB(blackboxCurrent->headspeed);
@@ -768,8 +766,7 @@ static void writeInterframe(void)
 
     // Calculate helicopter servo deltas from last BB frame and write as a group of 4 to this P interframe
     for (int x = 0; x < 4; x++) {
-        // +2 for MIXER_CUSTOM_AIRPLANE used with custom smix
-        deltas[x] = blackboxCurrent->servo[x+2] - blackboxLast->servo[x+2];
+        deltas[x] = blackboxCurrent->servo[x] - blackboxLast->servo[x];
     }
     blackboxWriteTag8_4S16(deltas);
 
@@ -1073,7 +1070,7 @@ static void loadMainState(timeUs_t currentTimeUs)
 
     const int motorCount = getMotorCount();
     for (int i = 0; i < motorCount; i++) {
-        blackboxCurrent->motor[i] = motor[i];
+        blackboxCurrent->motor[i] = motorOutput[i];
     }
 
     blackboxCurrent->vbatLatest = getBatteryVoltageLatest();
@@ -1091,11 +1088,10 @@ static void loadMainState(timeUs_t currentTimeUs)
     blackboxCurrent->rssi = getRssi();
 
 #ifdef USE_SERVOS
-    //Helicopter servos using MIXER_CUSTOM_AIRPLANE
+    blackboxCurrent->servo[0] = servo[0];
+    blackboxCurrent->servo[1] = servo[1];
     blackboxCurrent->servo[2] = servo[2];
     blackboxCurrent->servo[3] = servo[3];
-    blackboxCurrent->servo[4] = servo[4];
-    blackboxCurrent->servo[5] = servo[5];
 #endif
     blackboxCurrent->headspeed = getHeadSpeed();
 #else
