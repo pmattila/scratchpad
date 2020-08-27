@@ -20,6 +20,21 @@
 #include "platform.h"
 
 
+uint8_t getMotorCount(void);
+
+float getMotorOutput(uint8_t motor);
+uint16_t getMotorOutputExt(uint8_t motor);
+
+float getMotorOverride(uint8_t motor);
+uint16_t getMotorOverrideExt(uint8_t motor);
+
+void setMotorOverride(uint8_t motor, float value);
+void setMotorOverrideExt(uint8_t motor, uint16_t value);
+
+void resetMotorOverride(void);
+
+bool areMotorsRunning(void);
+
 bool isRpmSourceActive(void);
 
 int getMotorRPM(uint8_t motor);
@@ -29,6 +44,16 @@ int calcMotorRPM(uint8_t motor, int erpm);
 float calcMotorRPMf(uint8_t motor, int erpm);
 
 void rpmSourceInit(void);
-void rpmSourceUpdate(void);
 
-float getHeadSpeed(void);
+void motorStop(void);
+void motorInit(void);
+void motorUpdate(void);
+
+
+static inline void stopMotors(void) { motorStop(); }
+
+static inline void initEscEndpoints(void) { }
+
+static inline float getHeadSpeed(void) { return 0; }
+static inline float getMotorMixRange(void) { return 1.0f; }
+
