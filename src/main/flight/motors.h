@@ -51,4 +51,5 @@ static inline void initEscEndpoints(void) { }
 
 static inline float getHeadSpeed(void) { return getMotorRPMf(0); } // TODO
 
-static inline float getMotorMixRange(void) { return 1.0f; }
+static inline bool isHeliSpooledUp(void) { return false; } // TODO
+
