@@ -61,5 +61,3 @@ float getHeadSpeed(void);
 // HF3D compat:
 #define stopMotors()      motorStop()
 #define getMotorCount()   motorCount
-
-#define getMotorMixRange() 1.0f
