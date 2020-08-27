@@ -58,9 +58,9 @@
 
 #include "flight/failsafe.h"
 #include "flight/mixer.h"
-#include "flight/pid.h"
-#include "flight/rpm_filter.h"
 #include "flight/servos.h"
+#include "flight/motors.h"
+#include "flight/pid.h"
 
 #include "io/beeper.h"
 #include "io/gps.h"
@@ -633,7 +633,7 @@ static void writeIntraframe(void)
 #endif
 
     //Motors can be below minimum output when disarmed, but that doesn't happen much
-    blackboxWriteUnsignedVB(blackboxCurrent->motor[0] - motorOutputLow);
+    blackboxWriteUnsignedVB(blackboxCurrent->motor[0]);
 
     //Motors tend to be similar to each other so use the first motor's value as a predictor of the others
     const int motorCount = getMotorCount();
@@ -1091,7 +1091,7 @@ static void loadMainState(timeUs_t currentTimeUs)
 
     const int motorCount = getMotorCount();
     for (int i = 0; i < motorCount; i++) {
-        blackboxCurrent->motor[i] = motor[i];
+        blackboxCurrent->motor[i] = getMotorOutputExt(i);
     }
 
     blackboxCurrent->vbatLatest = getBatteryVoltageLatest();
@@ -1110,7 +1110,7 @@ static void loadMainState(timeUs_t currentTimeUs)
 
 #ifdef USE_SERVOS
     //Tail servo for tricopters
-    blackboxCurrent->servo[5] = servo[5];
+    blackboxCurrent->servo[5] = getServoOutput(5);
 #endif
 
 #else
@@ -1266,9 +1266,6 @@ STATIC_UNIT_TESTED char *blackboxGetStartDateTime(char *buf)
 static bool blackboxWriteSysinfo(void)
 {
 #ifndef UNIT_TEST
-    const uint16_t motorOutputLowInt = lrintf(motorOutputLow);
-    const uint16_t motorOutputHighInt = lrintf(motorOutputHigh);
-
     // Make sure we have enough room in the buffer for our longest line (as of this writing, the "Firmware date" line)
     if (blackboxDeviceReserveBufferSpace(64) != BLACKBOX_RESERVE_SUCCESS) {
         return false;
@@ -1296,7 +1293,6 @@ static bool blackboxWriteSysinfo(void)
         BLACKBOX_PRINT_HEADER_LINE("minthrottle", "%d",                     motorConfig()->minthrottle);
         BLACKBOX_PRINT_HEADER_LINE("maxthrottle", "%d",                     motorConfig()->maxthrottle);
         BLACKBOX_PRINT_HEADER_LINE("gyro_scale","0x%x",                     castFloatBytesToInt(1.0f));
-        BLACKBOX_PRINT_HEADER_LINE("motorOutput", "%d,%d",                  motorOutputLowInt,motorOutputHighInt);
 #if defined(USE_ACC)
         BLACKBOX_PRINT_HEADER_LINE("acc_1G", "%u",                          acc.dev.acc_1G);
 #endif
