@@ -253,10 +253,10 @@ void governorUpdate(void)
         //   Reasonable value would be 0.15 throttle addition for 12-degree collective throw..
         //   So gains in the 0.0015 - 0.0032 range depending on where max collective pitch is on the heli
         //   HF3D TODO:  Set this up so works off of a calibrated pitch value for the heli taken during setup
-        float govCollectiveFF = 0; //govColKf * pidGetCollectiveStickPercent();
+        float govCollectiveFF = govColKf * pidGetCollectiveStickPercent();
 
         // Collective pitch impulse feed-forward for the main motor
-        float govCollectivePulseFF = 0; //govColPulseKf * pidGetCollectiveStickHPF();
+        float govCollectivePulseFF = govColPulseKf * pidGetCollectiveStickHPF();
 
         // HF3D TODO:  Add a cyclic stick feedforward to the governor - linear gain should be fine.
         // Additional torque is required from the motor when adding cyclic pitch, just like collective (although less)
