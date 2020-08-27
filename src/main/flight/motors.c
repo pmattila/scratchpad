@@ -58,18 +58,45 @@
 #include "flight/pid.h"
 
 
+FAST_RAM_ZERO_INIT uint8_t        motorCount;
+
+FAST_RAM_ZERO_INIT float          motor[MAX_SUPPORTED_MOTORS];
+
+FAST_RAM_ZERO_INIT float          motorOutputLow;
+FAST_RAM_ZERO_INIT float          motorOutputHigh;
+FAST_RAM_ZERO_INIT float          motorOutputStop;
+FAST_RAM_ZERO_INIT float          motorOutputRange;
+FAST_RAM_ZERO_INIT float          motorOutputDisarmed[MAX_SUPPORTED_MOTORS];
+
 FAST_RAM_ZERO_INIT float          motorRpm[MAX_SUPPORTED_MOTORS];
 FAST_RAM_ZERO_INIT uint8_t        motorRpmSource[MAX_SUPPORTED_MOTORS];
 FAST_RAM_ZERO_INIT biquadFilter_t motorRpmFilter[MAX_SUPPORTED_MOTORS];
 
 
+uint8_t getMotorCount(void)
+{
+    return motorCount;
+}
+
 bool isRpmSourceActive(void)
 {
-    for (int i = 0; i < getMotorCount(); i++)
+    for (int i = 0; i < motorCount; i++)
         if (motorRpmSource[i] == RPM_SRC_NONE)
             return false;
 
     return true;
+}
+
+bool areMotorsRunning(void)
+{
+    if (ARMING_FLAG(ARMED))
+        return true;
+
+    for (int i = 0; i < motorCount; i++)
+        if (motorOutputDisarmed[i] != motorOutputStop)
+            return true;
+
+    return false;
 }
 
 int calcMotorRpm(uint8_t motorNumber, int erpm)
@@ -80,7 +107,7 @@ int calcMotorRpm(uint8_t motorNumber, int erpm)
 
 int getMotorRPM(uint8_t motor)
 {
-    if (motor < getMotorCount())
+    if (motor < motorCount)
         return motorRpm[motor];
     else
         return 0;
@@ -143,12 +170,72 @@ void rpmSourceInit(void)
     }
 }
 
-void rpmSourceUpdate(void)
+void initEscEndpoints(void)
 {
-    for (int i = 0; i < getMotorCount(); i++) {
+    if (isMotorProtocolDshot()) {
+        motorOutputLow  = DSHOT_MIN_THROTTLE;
+        motorOutputHigh = DSHOT_MAX_THROTTLE;
+        motorOutputStop = DSHOT_CMD_MOTOR_STOP;
+    }
+    else {
+        motorOutputLow  = motorConfig()->minthrottle;
+        motorOutputHigh = motorConfig()->maxthrottle;
+        motorOutputStop = motorConfig()->mincommand;
+    }
+
+    motorOutputRange = motorOutputHigh - motorOutputLow;
+}
+
+void motorInit(void)
+{
+    checkMotorProtocol(&motorConfig()->dev);
+
+    initEscEndpoints();
+    motorResetDisarmed();
+
+    motorCount = MIN(mixerGetActiveMotors(), MAX_SUPPORTED_MOTORS);
+
+    motorDevInit(&motorConfig()->dev, motorOutputStop, motorCount);
+}
+
+void motorUpdate(void)
+{
+    if (ARMING_FLAG(ARMED)) {
+        for (int i = 0; i < motorCount; i++) {
+            // Convert mixer motor output 0..1 to motor output
+            float out = mixerGetMotorOutput(i) * motorOutputRange + motorOutputLow;
+            motor[i] = constrainf(out, motorOutputLow, motorOutputHigh);
+        }
+        motorWriteAll(motor);
+    }
+    else {
+        motorWriteAll(motorOutputDisarmed);
+    }
+
+    for (int i = 0; i < motorCount; i++) {
         motorRpm[i] = biquadFilterApply(&motorRpmFilter[i], calcMotorRpm(i,getMotorERPM(i)));
         DEBUG_SET(DEBUG_RPM_SOURCE, i, motorRpm[i]);
     }
+}
+
+void motorStop(void)
+{
+    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++)
+        motor[i] = motorOutputStop;
+
+    motorWriteAll(motor);
+    delay(50);
+}
+
+void motorSetDisarmed(uint8_t motor, uint32_t value)
+{
+    motorOutputDisarmed[motor] = value;
+}
+
+void motorResetDisarmed(void)
+{
+    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++)
+        motorOutputDisarmed[i] = motorOutputStop;
 }
 
 float getHeadSpeed(void)
