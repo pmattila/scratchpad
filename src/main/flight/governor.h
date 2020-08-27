@@ -19,43 +19,34 @@
 
 #include "platform.h"
 
-
-typedef enum {
-    RPM_SRC_NONE = 0,
-    RPM_SRC_DSHOT_TELEM,
-    RPM_SRC_FREQ_SENSOR,
-    RPM_SRC_ESC_SENSOR,
-} rpmSource_e;
+#include "pg/pg.h"
 
 
-extern uint8_t motorCount;
+#define MAX_GOVERNOR_MOTORS 2
 
-extern float motor[];
+typedef struct governorConfig_s {
+    uint16_t gov_max_headspeed;
+    uint16_t gov_spoolup_time;
+    uint16_t gov_gear_ratio;
+    uint16_t gov_p_gain;
+    uint16_t gov_i_gain;
+    uint16_t gov_cyclic_ff_gain;
+    uint16_t gov_collective_ff_gain;
+    uint16_t gov_collective_ff_impulse_gain;
+} governorConfig_t;
 
-extern float motorOutputLow;
-extern float motorOutputHigh;
-extern float motorOutputStop;
-extern float motorOutputRange;
-
-
-bool isRpmSourceActive(void);
-bool areMotorsRunning(void);
-
-int getMotorRPM(uint8_t motor);
-int calcMotorRpm(uint8_t motor, int erpm);
-
-void rpmSourceInit(void);
-
-void initEscEndpoints(void);
-
-void motorInit(void);
-void motorStop(void);
-void motorUpdate(void);
-
-void motorResetDisarmed(void);
-void motorSetDisarmed(uint8_t motor, uint32_t value);
+PG_DECLARE(governorConfig_t, governorConfig);
 
 
-// HF3D compat:
-#define stopMotors()      motorStop()
-#define getMotorCount()   motorCount
+extern FAST_RAM_ZERO_INIT float govOutput[MAX_SUPPORTED_MOTORS];
+
+void governorInit();
+void governorUpdate();
+
+float governorGetGearRatio(void);
+float governorGetCollectivePulseFilterGain(void);
+
+bool isHeliSpooledUp(void);
+
+float getHeadSpeed(void);
+
