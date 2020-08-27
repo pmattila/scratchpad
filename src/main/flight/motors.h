@@ -50,7 +50,3 @@ static inline void stopMotors(void) { motorStop(); }
 
 static inline void initEscEndpoints(void) { }
 
-static inline float getHeadSpeed(void) { return 0; }
-
-static inline bool isHeliSpooledUp(void) { return false; }
-
