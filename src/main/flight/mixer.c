@@ -38,6 +38,7 @@
 #include "flight/pid.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
+#include "flight/governor.h"
 
 #include "rx/rx.h"
 
@@ -119,8 +120,8 @@ void mixerUpdate(void)
 
     mixerInput[MIXER_IN_STABILIZED_COLLECTIVE]  = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
 
-    mixerInput[MIXER_IN_GOVERNOR_MAIN] = 0; // govOutput[0];
-    mixerInput[MIXER_IN_GOVERNOR_TAIL] = 0; // govOutput[1];
+    mixerInput[MIXER_IN_GOVERNOR_MAIN] = govOutput[0];
+    mixerInput[MIXER_IN_GOVERNOR_TAIL] = govOutput[1];
 
     mixerInput[MIXER_IN_RC_ROLL]       = (rcData[ROLL]       - rxConfig()->midrc) * MIXER_RC_SCALING;
     mixerInput[MIXER_IN_RC_PITCH]      = (rcData[PITCH]      - rxConfig()->midrc) * MIXER_RC_SCALING;
