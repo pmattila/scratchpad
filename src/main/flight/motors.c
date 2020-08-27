@@ -66,18 +66,65 @@ typedef enum {
 } rpmSource_e;
 
 
+static FAST_RAM_ZERO_INIT uint8_t        motorCount;
+
+static FAST_RAM_ZERO_INIT float          motorOutput[MAX_SUPPORTED_MOTORS];
+static FAST_RAM_ZERO_INIT float          motorOverride[MAX_SUPPORTED_MOTORS];
+
 static FAST_RAM_ZERO_INIT float          motorRpm[MAX_SUPPORTED_MOTORS];
 static FAST_RAM_ZERO_INIT uint8_t        motorRpmDiv[MAX_SUPPORTED_MOTORS];
 static FAST_RAM_ZERO_INIT uint8_t        motorRpmSource[MAX_SUPPORTED_MOTORS];
 static FAST_RAM_ZERO_INIT biquadFilter_t motorRpmFilter[MAX_SUPPORTED_MOTORS];
 
 
+uint8_t getMotorCount(void)
+{
+    return motorCount;
+}
+
+float getMotorOutput(uint8_t motor)
+{
+    return motorOutput[motor];
+}
+
+uint16_t getMotorOutputExt(uint8_t motor)
+{
+    return lrintf(motorOutput[motor] * 1000);
+}
+
+float getMotorOverride(uint8_t motor)
+{
+    return motorOverride[motor];
+}
+
+float setMotorOverride(uint8_t motor, float value)
+{
+    return motorOverride[motor] = constrainf(value, 0, 1);
+}
+
+void resetMotorOverride(void)
+{
+    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++)
+        motorOverride[i] = 0;
+}
+
+bool areMotorsRunning(void)
+{
+    if (ARMING_FLAG(ARMED))
+        return true;
+
+    for (int i = 0; i < motorCount; i++)
+        if (motorOutput[i] > 0)
+            return true;
+
+    return false;
+}
+
 bool isRpmSourceActive(void)
 {
     for (int i = 0; i < getMotorCount(); i++)
         if (motorRpmSource[i] == RPM_SRC_NONE)
             return false;
-
     return true;
 }
 
@@ -151,11 +198,36 @@ void rpmSourceInit(void)
     }
 }
 
-void rpmSourceUpdate(void)
+
+void motorInit(void)
 {
-    for (int i = 0; i < getMotorCount(); i++) {
+    motorCount = mixerGetActiveMotors();
+
+    motorDevInit(&motorConfig()->dev, motorCount);
+}
+
+void motorUpdate(void)
+{
+    for (int i = 0; i < motorCount; i++) {
+        if (ARMING_FLAG(ARMED))
+            motorOutput[i] = constrainf(mixerGetMotorOutput(i), 0, 1);
+        else
+            motorOutput[i] = motorOverride[i];
+    }
+
+    motorWriteAll(motorOutput);
+
+    for (int i = 0; i < motorCount; i++) {
         motorRpm[i] = biquadFilterApply(&motorRpmFilter[i], calcMotorRPMf(i,getMotorERPM(i)));
         DEBUG_SET(DEBUG_RPM_SOURCE, i, lrintf(motorRpm[i]));
     }
 }
 
+void motorStop(void)
+{
+    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++)
+        motorOutput[i] = 0;
+
+    motorWriteAll(motorOutput);
+    delay(50);
+}

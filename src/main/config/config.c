@@ -407,10 +407,6 @@ static void validateAndFixConfig(void)
     featureDisableImmediate(FEATURE_OSD);
 #endif
 
-#ifndef USE_SERVOS
-    featureDisableImmediate(FEATURE_CHANNEL_FORWARDING);
-#endif
-
 #ifndef USE_RX_SPI
     featureDisableImmediate(FEATURE_RX_SPI);
 #endif
@@ -458,8 +454,7 @@ static void validateAndFixConfig(void)
 #endif
 #endif
 
-    bool configuredMotorProtocolDshot = false;
-    checkMotorProtocolEnabled(&motorConfig()->dev, &configuredMotorProtocolDshot);
+    bool configuredMotorProtocolDshot = checkMotorProtocolDshot(&motorConfig()->dev);
 #if defined(USE_DSHOT)
     // If using DSHOT protocol disable unsynched PWM as it's meaningless
     if (configuredMotorProtocolDshot) {
@@ -589,8 +584,7 @@ void validateAndFixGyroConfig(void)
         }
 
         if (motorConfig()->dev.useUnsyncedPwm) {
-            bool configuredMotorProtocolDshot = false;
-            checkMotorProtocolEnabled(&motorConfig()->dev, &configuredMotorProtocolDshot);
+            bool configuredMotorProtocolDshot = checkMotorProtocolDshot(&motorConfig()->dev);
             // Prevent overriding the max rate of motors
             if (!configuredMotorProtocolDshot && motorConfig()->dev.motorPwmProtocol != PWM_TYPE_STANDARD) {
                 const uint32_t maxEscRate = lrintf(1.0f / motorUpdateRestriction);
