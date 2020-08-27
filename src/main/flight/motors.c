@@ -238,8 +238,3 @@ void motorResetDisarmed(void)
         motorOutputDisarmed[i] = motorOutputStop;
 }
 
-float getHeadSpeed(void)
-{
-    return 0; // TODO
-}
-
