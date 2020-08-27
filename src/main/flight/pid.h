@@ -151,6 +151,7 @@ typedef struct pidProfile_s {
     uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
     uint8_t error_decay_always;             // Always decay accumulated I term and Abs Control error?
     uint8_t error_decay_rate;               // Rate to decay accumulated error in deg/s
+    uint16_t rescue_collective;             // Collective pitch command when rescue is fully upright
 
 } pidProfile_t;
 
@@ -215,3 +216,4 @@ float pidGetSpikeLimitInverse();
 float dynDtermLpfCutoffFreq(float throttle, uint16_t dynLpfMin, uint16_t dynLpfMax, uint8_t expo);
 float getCollectiveDeflectionAbs();
 float getCollectiveDeflectionAbsHPF();
+uint16_t pidGetRescueCollectiveSetting();
