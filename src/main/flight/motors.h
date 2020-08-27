@@ -50,6 +50,5 @@ static inline void stopMotors(void) { motorStop(); }
 
 static inline void initEscEndpoints(void) { }
 
-static inline float getHeadSpeed(void) { return 0; }
 static inline float getMotorMixRange(void) { return 1.0f; }
 
