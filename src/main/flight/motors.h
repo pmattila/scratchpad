@@ -57,8 +57,6 @@ void motorUpdate(void);
 void motorResetDisarmed(void);
 void motorSetDisarmed(uint8_t motor, uint32_t value);
 
-float getHeadSpeed(void);
-
 // HF3D compat:
 #define stopMotors()         motorStop()
 #define getMotorMixRange()   1.0f
