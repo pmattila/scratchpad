@@ -774,7 +774,6 @@ bool processRx(timeUs_t currentTimeUs)
     failsafeUpdateState();
 
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
-    const uint8_t throttlePercent = calculateThrottlePercentAbs();
 
     const bool launchControlActive = isLaunchControlActive();
 
@@ -805,6 +804,8 @@ bool processRx(timeUs_t currentTimeUs)
     // to at least runaway_takeoff_stick_percent percent while the pidSum on all axis is kept low.
     // Once the amount of accumulated time exceeds runaway_takeoff_deactivate_delay then disable
     // prevention for the remainder of the battery.
+
+    const uint8_t throttlePercent = calculateThrottlePercentAbs();
 
     if (ARMING_FLAG(ARMED)
         && pidConfig()->runaway_takeoff_prevention
