@@ -242,3 +242,9 @@
 #define USE_RX_FLYSKY_SPI_LED
 
 #define USE_CUSTOM_DEFAULTS
+
+#undef  USE_CMS
+#undef  USE_OSD
+#undef  USE_MAX7456
+#undef  USE_RUNAWAY_TAKEOFF
+
