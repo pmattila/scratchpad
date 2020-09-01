@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'heliflight/*'
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v2
+
+    - name: Cache ARM tools
+      uses: actions/cache@v2
+      env:
+        cache-name: cache-arm-tools
+      with:
+        path: downloads/gcc-arm-none-eabi-9-2019-q4-major-x86_64-linux.tar.bz2
+        key: gcc-arm-none-eabi-9-2019-q4-major-x86_64-linux
+
+    - name: Install ARM tools
+      run: make arm_sdk_install
+
+    - name: Set build variables
+      run: |
+        echo ::set-env name=release::"v${GITHUB_REF##*/}"
+
+    - name: Build HEX files for unified targets
+      run: make unified SUFFIX=-${{ env.release }}
+
+    - name: Create ZIP
+      run: cd obj && zip ../heliflight-${release}.zip *.hex
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      id: create
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        release_name: HeliFlight ${{ env.release }}
+        tag_name: ${{ github.ref }}
+        body_path: Release.md
+        prerelease: false
+        draft: false
+
+    - name: Upload Firmware
+      id: upload-firmware
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create.outputs.upload_url }}
+        asset_path: heliflight-${{ env.release }}.zip
+        asset_name: heliflight-${{ env.release }}.zip
+        asset_content_type: application/zip
+
