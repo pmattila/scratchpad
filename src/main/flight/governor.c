@@ -57,10 +57,10 @@
 #include "flight/pid.h"
 
 #define DEBUG_GOV_MAIN
-//#define DEBUG_GOV_TAIL
-//#define DEBUG_GOV_PARTS
-//#define DEBUG_GOV_PIDSUM
-//#define DEBUG_GOV_THROTTLE
+#define DEBUG_GOV_TAIL
+#define DEBUG_GOV_PARTS
+#define DEBUG_GOV_PIDSUM
+#define DEBUG_GOV_THROTTLE
 
 
 PG_REGISTER_WITH_RESET_TEMPLATE(governorConfig_t, governorConfig, PG_GOVERNOR_CONFIG, 0);
@@ -270,10 +270,10 @@ void governorUpdate(void)
         // --------------- End of Spoolup Logic --------------
 
 #ifdef DEBUG_GOV_THROTTLE
-        DEBUG_SET(DEBUG_GOVERNOR, 0, headSpeed);
-        DEBUG_SET(DEBUG_GOVERNOR, 1, throttle * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 2, lastSpoolThrottle * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 3, govSpooledUp ? 1000 : 0);
+        DEBUG_SET(DEBUG_USER1, 0, headSpeed);
+        DEBUG_SET(DEBUG_USER1, 1, throttle * 1000);
+        DEBUG_SET(DEBUG_USER1, 2, lastSpoolThrottle * 1000);
+        DEBUG_SET(DEBUG_USER1, 3, govSpooledUp ? 1000 : 0);
 #endif
 
 
@@ -360,16 +360,16 @@ void governorUpdate(void)
             lastSpoolThrottle = govMain;
 
 #ifdef DEBUG_GOV_PIDSUM
-            DEBUG_SET(DEBUG_GOVERNOR, 0, govError * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 1, govP * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 2, govI * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 3, govPidSum * 1000);
+            DEBUG_SET(DEBUG_USER2, 0, govError * 1000);
+            DEBUG_SET(DEBUG_USER2, 1, govP * 1000);
+            DEBUG_SET(DEBUG_USER2, 2, govI * 1000);
+            DEBUG_SET(DEBUG_USER2, 3, govPidSum * 1000);
 #endif
 #ifdef DEBUG_GOV_PARTS
-            DEBUG_SET(DEBUG_GOVERNOR, 0, govBaseThrottle * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 1, govFeedForward * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 2, govPidSum * 1000);
-            DEBUG_SET(DEBUG_GOVERNOR, 3, govMain  * 1000);
+            DEBUG_SET(DEBUG_USER3, 0, govBaseThrottle * 1000);
+            DEBUG_SET(DEBUG_USER3, 1, govFeedForward * 1000);
+            DEBUG_SET(DEBUG_USER3, 2, govPidSum * 1000);
+            DEBUG_SET(DEBUG_USER3, 3, govMain  * 1000);
 #endif
         }
 
@@ -410,10 +410,10 @@ void governorUpdate(void)
 #endif
 
 #ifdef DEBUG_GOV_TAIL
-        DEBUG_SET(DEBUG_GOVERNOR, 0, throttle * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 1, pidSum * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 2, govTail * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 3, govMain * 1000);
+        DEBUG_SET(DEBUG_USER4, 0, throttle * 1000);
+        DEBUG_SET(DEBUG_USER4, 1, pidSum * 1000);
+        DEBUG_SET(DEBUG_USER4, 2, govTail * 1000);
+        DEBUG_SET(DEBUG_USER4, 3, govMain * 1000);
 #endif
     }  // end of tail motor handling
 
