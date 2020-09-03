@@ -1454,7 +1454,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         pidData[axis].Sum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
 
         // Limited PID sum
-        pidData[axis].SumLim = constrainf(pidData[axis].Sum, -currentPidProfile->pidSumLimit, currentPidProfile->pidSumLimit);
+        const float pidLimit = (axis == FD_YAW) ? currentPidProfile->pidSumLimitYaw : currentPidProfile->pidSumLimit;
+        pidData[axis].SumLim = constrainf(pidData[axis].Sum, -pidLimit, pidLimit);
     }
 
     // Disable PID control if gyro overflow detected
