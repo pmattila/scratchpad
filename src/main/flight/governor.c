@@ -74,6 +74,7 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_cyclic_ff_gain = 0,
     .gov_collective_ff_gain = 0,
     .gov_collective_ff_impulse_gain = 0,
+    .gov_tailmotor_assist_gain = 0,
 );
 
 
@@ -331,6 +332,25 @@ void governorUpdate(void)
                 govSetpointLimited = constrainf(govSetpointLimited - setPointRampRate, govSetpoint, govSetpointLimited);
             }
 
+            float govTailmotorAssist = 0.0f;
+
+#ifdef USE_HF3D_ASSISTED_TAIL
+            // Allow main motor govern to assist motor driven tail to yaw in the main motor torque direction.
+            //   It's more important that we maintain tail authority than it is to prevent overspeeds.
+            //   Constrain the main motor throttle assist to 15% for now.
+            if ((motorCount > 1) && (pidData[FD_YAW].SumLim > 0.0f)) {
+                // NOTE:  Make sure to update pidSumHighLimiYaw in pid.c if the 0.15f constraint is changed.
+                // Calculate the desired throttle adder
+                govTailmotorAssist = constrainf((float)governorConfig()->gov_tailmotor_assist_gain / 100.0f * pidData[FD_YAW].SumLim * MIXER_PID_SCALING, 0.0f, 0.15f);
+                // Now we must prevent the governor from regulating down while we're assisting the tail motor unless we're more than 15% over our governor's headspeed setpoint
+                if (headSpeed > govSetpointLimited && headSpeed < govSetpoint*1.15f) {
+                    // Increase the rate-limited setpoint so that it tracks the headspeed higher and prevents the govPgain from offsetting our tailmotor assist
+                    //   5x ramp rate was chosen because that's about how fast you need to be able to track the headspeed increase for a fast burst of throttle
+                    //   Need to increase govSetpointLimited 1x faster than desired ramp rate because it will be decremented by ramp rate in the governor setpoint change code above
+                    govSetpointLimited = constrainf(govSetpointLimited + 6.0f*setPointRampRate, govSetpointLimited, headSpeed);
+                }
+            }
+#endif
             // Quick and dirty collective pitch linear feed-forward for the main motor
             // Calculate linear feedforward vs. collective stick position (always positive adder)
             //   Reasonable value would be 0.15 throttle addition for 12-degree collective throw..
@@ -374,7 +394,7 @@ void governorUpdate(void)
             //            to keep torque equal, so those shouldn't have to change.
 
             // Generate our new governed throttle signal
-            govMain = govBaseThrottle + govFeedForward + govPidSum;
+            govMain = govBaseThrottle + govFeedForward + govPidSum + govTailmotorAssist;
 
             // Reset any wind-up due to excess control signal
             if (govMain > 1.0) {
@@ -596,8 +616,10 @@ void governorUpdate(void)
     // HF3D TODO:  Eventually need to support motor driven + variable pitch combination tails
     if (getMotorCount() > 1) {
 
-        // motorMix for tail motor should be 100% stabilized yaw channel
-        float pidSum = pidData[FD_YAW].SumLim * MIXER_PID_SCALING;
+        // motorMix for tail motor should be 100% of the inverted stabilized yaw channel
+        //  Negative yaw pidSum ==> Tail motor spins
+        //  Positive yaw pidSum ==> Main motor gov assist
+        float pidSum = pidData[FD_YAW].SumLim * MIXER_PID_SCALING * -1.0f;
 
         //  For a tail motor.. we don't really want it spinning like crazy from base thrust anytime we're armed,
         //   so tone it down a bit using the main motor throttle as a gain until we're at half our throttle setting or something.
