@@ -1075,6 +1075,7 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
             sbufWriteU16(dst, servoParams(i)->min);
             sbufWriteU16(dst, servoParams(i)->max);
             sbufWriteU16(dst, servoParams(i)->mid);
+            sbufWriteU16(dst, servoParams(i)->trim);
             sbufWriteU16(dst, servoParams(i)->rate);
             sbufWriteU16(dst, servoParams(i)->speed);
         }
@@ -2311,15 +2312,15 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
         i = sbufReadU8(src);
         if (i >= MAX_SUPPORTED_SERVOS) {
             return MSP_RESULT_ERROR;
-        } else {
-            servoParamsMutable(i)->min = sbufReadU16(src);
-            servoParamsMutable(i)->max = sbufReadU16(src);
-            servoParamsMutable(i)->mid = sbufReadU16(src);
-            servoParamsMutable(i)->rate = sbufReadU16(src);
-            servoParamsMutable(i)->speed = sbufReadU16(src);
         }
-#endif
+        servoParamsMutable(i)->min = sbufReadU16(src);
+        servoParamsMutable(i)->max = sbufReadU16(src);
+        servoParamsMutable(i)->mid = sbufReadU16(src);
+        servoParamsMutable(i)->trim = sbufReadU16(src);
+        servoParamsMutable(i)->rate = sbufReadU16(src);
+        servoParamsMutable(i)->speed = sbufReadU16(src);
         break;
+#endif
 
     case MSP_SET_RC_DEADBAND:
         rcControlsConfigMutable()->deadband = sbufReadU8(src);
