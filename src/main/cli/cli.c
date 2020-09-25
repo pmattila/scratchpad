@@ -2245,13 +2245,13 @@ static void cliServo(const char *cmdName, char *cmdline)
 #endif
 
 static const char flightModeMapLetters[32] = {
-    [ANGLE_MODE_BIT          ]  = 'A',
+    [RESCUE_MODE_BIT         ]  = 'R',
     [HORIZON_MODE_BIT        ]  = 'H',
     [PASSTHRU_MODE_BIT       ]  = 'P',
     [FAILSAFE_MODE_BIT       ]  = 'F',
     [GPS_RESCUE_MODE_BIT     ]  = 'G',
 
-    [ANGLE_MODE_BIT      + 16]  = 'a',
+    [RESCUE_MODE_BIT     + 16]  = 'r',
     [HORIZON_MODE_BIT    + 16]  = 'h',
     [PASSTHRU_MODE_BIT   + 16]  = 'p',
     [FAILSAFE_MODE_BIT   + 16]  = 'f',
