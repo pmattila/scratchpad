@@ -139,7 +139,7 @@ void governorUpdate(void)
     // Other code looks to governor.c for headspeed, update it on every loop.
     headSpeed = getMotorRPM(0) / govGearRatio;
 
-    float throttle = mixerGetThrottle();
+    float throttle = constrainf(mixerGetThrottle() - 10e-6f, 0, 1);
     float govMain = 0.0;
     float govTail = 0.0;
 
