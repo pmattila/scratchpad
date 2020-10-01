@@ -56,12 +56,6 @@
 #include "flight/mixer.h"
 #include "flight/pid.h"
 
-#define DEBUG_GOV_COMPAT
-//#define DEBUG_GOV_TAIL
-//#define DEBUG_GOV_PARTS
-//#define DEBUG_GOV_PIDSUM
-//#define DEBUG_GOV_THROTTLE
-
 
 PG_REGISTER_WITH_RESET_TEMPLATE(governorConfig_t, governorConfig, PG_GOVERNOR_CONFIG, 0);
 
@@ -75,10 +69,17 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_collective_ff_gain = 0,
     .gov_collective_ff_impulse_gain = 0,
     .gov_tailmotor_assist_gain = 0,
+    .gov_cc_filter = 1000,
+    .gov_ff_filter = 1000,
+    .gov_ff_exponent = 150,
+    .gov_vbat_filter = 25,
+    .gov_vbat_offset = 0,
+    .gov_method = 0,
 );
 
 
 FAST_RAM_ZERO_INIT float govOutput[MAX_SUPPORTED_MOTORS];
+
 FAST_RAM_ZERO_INIT uint8_t govState;
 
 static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
@@ -91,6 +92,7 @@ static FAST_RAM_ZERO_INIT float govCycKf;
 static FAST_RAM_ZERO_INIT float govColKf;
 static FAST_RAM_ZERO_INIT float govColPulseKf;
 
+static FAST_RAM_ZERO_INIT float govError;
 static FAST_RAM_ZERO_INIT float govI;
 static FAST_RAM_ZERO_INIT float govP;
 static FAST_RAM_ZERO_INIT float govPidSum;
@@ -98,22 +100,87 @@ static FAST_RAM_ZERO_INIT float govPidSum;
 static FAST_RAM_ZERO_INIT float govSetpoint;
 static FAST_RAM_ZERO_INIT float govSetpointLimited;
 static FAST_RAM_ZERO_INIT float govBaseThrottle;
+static FAST_RAM_ZERO_INIT float govFeedForward;
+
+static FAST_RAM_ZERO_INIT float govCyclicFF;
+static FAST_RAM_ZERO_INIT float govCollectiveFF;
+static FAST_RAM_ZERO_INIT float govCollectivePulseFF;
 
 static FAST_RAM_ZERO_INIT float headSpeed;
 
+static FAST_RAM_ZERO_INIT float Vbat;
+static FAST_RAM_ZERO_INIT float VbatOffset;
+static FAST_RAM_ZERO_INIT float VbatFilter;
+
+static FAST_RAM_ZERO_INIT float ffExponent;
+static FAST_RAM_ZERO_INIT float ffFilter;
+static FAST_RAM_ZERO_INIT float ccFilter;
+
+static FAST_RAM_ZERO_INIT uint8_t govMethod;
+
 static FAST_RAM_ZERO_INIT float govMainPrevious;
 static FAST_RAM_ZERO_INIT timeMs_t stateEntryTime;
+
+
+//static FAST_RAM_ZERO_INIT float hsValue;
+static FAST_RAM_ZERO_INIT float hsDiff;
+static FAST_RAM_ZERO_INIT float hsMean;
+static FAST_RAM_ZERO_INIT float hsVar;
+
+//static FAST_RAM_ZERO_INIT float vbValue;
+static FAST_RAM_ZERO_INIT float vbDiff;
+static FAST_RAM_ZERO_INIT float vbMean;
+static FAST_RAM_ZERO_INIT float vbVar;
+
+static FAST_RAM_ZERO_INIT float vtValue;
+static FAST_RAM_ZERO_INIT float vtDiff;
+static FAST_RAM_ZERO_INIT float vtMean;
+static FAST_RAM_ZERO_INIT float vtVar;
+
+static FAST_RAM_ZERO_INIT float cxValue;
+static FAST_RAM_ZERO_INIT float cxDiff;
+static FAST_RAM_ZERO_INIT float cxMean;
+static FAST_RAM_ZERO_INIT float cxVar;
+
+static FAST_RAM_ZERO_INIT float ffValue;
+static FAST_RAM_ZERO_INIT float ffDiff;
+static FAST_RAM_ZERO_INIT float ffMean;
+static FAST_RAM_ZERO_INIT float ffVar;
+
+static FAST_RAM_ZERO_INIT float hsvbCovar;
+static FAST_RAM_ZERO_INIT float hsvtCovar;
+static FAST_RAM_ZERO_INIT float cxffCovar;
+
+static FAST_RAM_ZERO_INIT float ccValue;
+static FAST_RAM_ZERO_INIT float csValue;
+static FAST_RAM_ZERO_INIT float cfValue;
+static FAST_RAM_ZERO_INIT float cbValue;
+
+static FAST_RAM_ZERO_INIT float ccEstimate;
+static FAST_RAM_ZERO_INIT float csEstimate;
+static FAST_RAM_ZERO_INIT float cfEstimate;
+static FAST_RAM_ZERO_INIT float cbEstimate;
+
+
+
 
 void governorInit(void)
 {
     govMaxHeadspeed  = (float)governorConfig()->gov_max_headspeed;
     govGearRatio     = (float)governorConfig()->gov_gear_ratio / 1000.0;
-    govRampRate      = (float)pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 30);
+    govRampRate      = (float)pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 100);
     govKp            = (float)governorConfig()->gov_p_gain / 10.0;
     govKi            = (float)governorConfig()->gov_i_gain / 10.0;
     govCycKf         = (float)governorConfig()->gov_cyclic_ff_gain / 100.0;
     govColKf         = (float)governorConfig()->gov_collective_ff_gain / 100.0;
     govColPulseKf    = (float)governorConfig()->gov_collective_ff_impulse_gain / 100.0;
+    VbatFilter       = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_vbat_filter);
+    VbatOffset       = (float)governorConfig()->gov_vbat_offset / 100.0f;
+    ffExponent       = (float)governorConfig()->gov_ff_exponent / 100.0f;
+    ffFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_ff_filter);
+    ccFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cc_filter);
+
+    govMethod        = governorConfig()->gov_method;
 
     govState = GS_THROTTLE_OFF;
 }
@@ -134,24 +201,125 @@ bool headSpeedValid(void)
     return false;
 }
 
+void resetStats(void)
+{
+    vtValue  = 0;
+    cxValue  = 0;
+    ffValue  = 0;
+
+    hsMean  = 0;
+    vbMean  = 0;
+    vtMean  = 0;
+    cxMean  = 0;
+    ffMean  = 0;
+
+    hsDiff  = 0;
+    vbDiff  = 0;
+    vtDiff  = 0;
+    cxDiff  = 0;
+    ffDiff  = 0;
+
+    hsVar   = 0;
+    vbVar   = 0;
+    vtVar   = 0;
+    cxVar   = 0;
+    ffVar   = 0;
+
+    hsvbCovar  = 0;
+    hsvtCovar  = 0;
+    cxffCovar  = 0;
+
+    ccValue = 0;
+    csValue = 0;
+    cfValue = 0;
+    cbValue = 0;
+}
+
+
 void governorUpdate(void)
 {
     // Other code looks to governor.c for headspeed, update it on every loop.
     headSpeed = getMotorRPM(0) / govGearRatio;
 
+    // Battery voltage average
+    Vbat += ((getBatteryVoltageLatest() * 0.01f) - Vbat) * VbatFilter;
+    float Veff = Vbat - VbatOffset;
+
+    // Current throttle
     float throttle = constrainf(mixerGetThrottle() - 10e-6f, 0, 1);
+
+    // Output variables
     float govMain = 0.0;
     float govTail = 0.0;
+
+    govPidSum = govError = govP = 0;
+    govCyclicFF = govCollectiveFF = govCollectivePulseFF = 0;
 
     // If we're disarmed or no motors, reset the governor state and variables, then exit.
     //   This method does not preserve looptime while disarmed, but it is *safe*.
     // HF3D TODO:  Disarming in flight is catastrophic in many respects throughout the code.  Should it be?
     if (!ARMING_FLAG(ARMED) || getMotorCount() < 1) {
         changeGovStateTo(GS_THROTTLE_OFF);
+        resetStats();
         govMainPrevious = 0.0;
         govOutput[0] = 0.0;
         govOutput[1] = 0.0;
         return;
+    }
+
+    {
+        // Quick and dirty collective pitch linear feed-forward for the main motor
+        // Calculate linear feedforward vs. collective stick position (always positive adder)
+        //   Reasonable value would be 0.15 throttle addition for 12-degree collective throw..
+        //   So gains in the 0.0015 - 0.0032 range depending on where max collective pitch is on the heli
+        //   HF3D TODO:  Set this up so it works off of a calibrated pitch value for the heli taken during setup
+        govCollectiveFF = govColKf * getCollectiveDeflectionAbs();
+
+        // Collective pitch impulse feed-forward for the main motor
+        govCollectivePulseFF = govColPulseKf * getCollectiveDeflectionAbsHPF();
+
+        // HF3D TODO:  Add a cyclic stick feedforward to the governor - linear gain should be fine.
+        // Additional torque is required from the motor when adding cyclic pitch, just like collective (although less)
+        // Maybe use this?:  float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
+        // It's calculated like this in the pid.c code:
+        //   Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
+        //   servosGetCyclicDeflection() is a 0..1.0f value that is a fraction of the total cyclic travel allowed (usually 10 degrees)
+        govCyclicFF = govCycKf * getCyclicDeflection();
+
+        // Total FeedForward
+        govFeedForward = govCollectiveFF + govCollectivePulseFF + govCyclicFF;
+
+        // Aerodynamic drag vs angle of attack approx
+        ffValue = powf(govFeedForward, ffExponent);
+
+        // Analysis
+        if (govOutput[0] > 0.10f && headSpeed > 100)
+        {
+            vtValue = Veff * govOutput[0];
+            cxValue = vtValue / headSpeed;
+
+            hsDiff = headSpeed - hsMean;
+            vbDiff = Vbat    - vbMean;
+            vtDiff = vtValue - vtMean;
+            cxDiff = cxValue - cxMean;
+            ffDiff = ffValue - ffMean;
+
+            hsMean += hsDiff * ffFilter;
+            vbMean += vbDiff * ffFilter;
+            vtMean += vtDiff * ffFilter;
+            cxMean += cxDiff * ffFilter;
+            ffMean += ffDiff * ffFilter;
+
+            hsVar += (hsDiff * hsDiff - hsVar) * ffFilter;
+            vbVar += (vbDiff * vbDiff - vbVar) * ffFilter;
+            vtVar += (vtDiff * vtDiff - vtVar) * ffFilter;
+            cxVar += (cxDiff * cxDiff - cxVar) * ffFilter;
+            ffVar += (ffDiff * ffDiff - ffVar) * ffFilter;
+
+            hsvbCovar += (hsDiff * vbDiff - hsvbCovar) * ffFilter;
+            hsvtCovar += (hsDiff * vtDiff - hsvtCovar) * ffFilter;
+            cxffCovar += (cxDiff * ffDiff - cxffCovar) * ffFilter;
+        }
     }
 
     // Determine the main motor output based on the current governor state
@@ -162,6 +330,7 @@ void governorUpdate(void)
         // Reset gov parameters
         govMainPrevious = 0.0;
         govMain = 0.0;
+        govI = 0.0;
         // If we now have a throttle signal, transition to a new gov state on the next loop iteration
         // HF3D TODO:  min_check instead of 0 throttle?  Or no?
         if (throttle >= 0.20 && govMaxHeadspeed > 0) {
@@ -174,9 +343,11 @@ void governorUpdate(void)
             // Pass-through with slow spool-up if no governor but gov spoolup time is set
             changeGovStateTo(GS_PASSTHROUGH_SPOOLING_UP);
         }
+        resetStats();
         break;
 
     case GS_PASSTHROUGH_SPOOLING_UP:
+        govI = 0.0;
         // -- State complete
         // State only entered if gov_spoolup_time > 0
         if (throttle > 0) {
@@ -204,6 +375,7 @@ void governorUpdate(void)
         break;
 
     case GS_PASSTHROUGH_ACTIVE:
+        govI = 0.0;
         // -- State complete
         // Passthrough throttle signal if it is non-zero
         if (throttle > 0) {
@@ -218,6 +390,7 @@ void governorUpdate(void)
         break;
 
     case GS_PASSTHROUGH_LOST_THROTTLE:
+        govI = 0.0;
         // -- State complete
         if (throttle > 0.0) {
             // regained throttle within timer, move back to passthrough state or bailout if set to slow spool
@@ -246,6 +419,7 @@ void governorUpdate(void)
         break;
 
     case GS_GOVERNOR_SPOOLING_UP:
+        govI = 0.0;
         // Check to ensure throttle remains above 0.20 during spool-up, otherwise drop back to THROTTLE_OFF
         if (throttle >= 0.20) {
             // Check for lack of headspeed signal during spool-up when motor output > 20%
@@ -289,6 +463,27 @@ void governorUpdate(void)
                 // Increase throttle another ramp step
                 govMainPrevious += govRampRate;
                 govMain = govMainPrevious;
+            }
+
+            // Analysis
+            if (govMain > 0.10f && headSpeed > 100) {
+                if (hsVar > 100) {
+                    csValue = hsvtCovar / hsVar;
+                    ccValue = vtMean - hsMean * csValue;
+                }
+
+                if (govMethod == 1) {
+                    csEstimate = cxMean;
+                    ccEstimate = 0;
+                    cfEstimate = csEstimate / 4;
+                    cbEstimate = 0;
+                }
+                else if (govMethod == 2) {
+                    csEstimate = csValue;
+                    ccEstimate = ccValue;
+                    cfEstimate = csEstimate / 4;
+                    cbEstimate = 0;
+                }
             }
         }
         // throttle < 0.20
@@ -354,33 +549,17 @@ void governorUpdate(void)
                 }
             }
 #endif
-            // Quick and dirty collective pitch linear feed-forward for the main motor
-            // Calculate linear feedforward vs. collective stick position (always positive adder)
-            //   Reasonable value would be 0.15 throttle addition for 12-degree collective throw..
-            //   So gains in the 0.0015 - 0.0032 range depending on where max collective pitch is on the heli
-            //   HF3D TODO:  Set this up so it works off of a calibrated pitch value for the heli taken during setup
-            float govCollectiveFF = govColKf * getCollectiveDeflectionAbs();
-
-            // Collective pitch impulse feed-forward for the main motor
-            float govCollectivePulseFF = govColPulseKf * getCollectiveDeflectionAbsHPF();
-
-            // HF3D TODO:  Add a cyclic stick feedforward to the governor - linear gain should be fine.
-            // Additional torque is required from the motor when adding cyclic pitch, just like collective (although less)
-            // Maybe use this?:  float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
-            // It's calculated like this in the pid.c code:
-            //   Calculate absolute value of the percentage of cyclic stick throw (both combined... but swash ring is the real issue).
-            //   servosGetCyclicDeflection() is a 0..1.0f value that is a fraction of the total cyclic travel allowed (usually 10 degrees)
-            float govCyclicFF = govCycKf * getCyclicDeflection();
-
-            // Total FeedForward
-            float govFeedForward = govCollectiveFF + govCollectivePulseFF + govCyclicFF;
+            // Calculate base throttle from physics model
+            if (govMethod == 1 || govMethod == 2) {
+                govBaseThrottle = constrainf((govSetpointLimited * (cfEstimate * ffValue + csEstimate) + ccEstimate) / Veff, 0.25f, 0.95f );
+            }
 
             // Calculate error as a percentage of the max headspeed, since 100% throttle should be close to max headspeed
             // HF3D TODO:  Do we really want the governor to respond the same even if setpoint is only 60% of max?
             //   100 rpm error on 60% of max would "feel" a lot different than 100 rpm error on 90% of max headspeed.
             //   But would it really require any torque differences for the same response??  Maybe, since less inertia in head?
             //   Would govSetpoint make more sense than govMaxHeadspeed?
-            float govError = (govSetpointLimited - headSpeed) / govMaxHeadspeed;
+            govError = (govSetpointLimited - headSpeed) / govMaxHeadspeed;
 
             // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
             govP = govKp * govError;
@@ -397,7 +576,12 @@ void governorUpdate(void)
             //            to keep torque equal, so those shouldn't have to change.
 
             // Generate our new governed throttle signal
-            govMain = govBaseThrottle + govFeedForward + govPidSum + govTailmotorAssist;
+            if (govMethod == 0) {
+                govMain = govBaseThrottle + govFeedForward + govPidSum + govTailmotorAssist;
+            }
+            else if (govMethod == 1 || govMethod == 2) {
+                govMain = govBaseThrottle + govPidSum;
+            }
 
             // Reset any wind-up due to excess control signal
             if (govMain > 1.0) {
@@ -416,6 +600,23 @@ void governorUpdate(void)
                 govMain = 0.0;
             }
             govMainPrevious = govMain;
+
+            if (govMain > 0.10f && headSpeed > 100) {
+                if (ffVar > 0.001) {
+                    cfValue = cxffCovar / ffVar;
+                    csValue = cxMean - ffMean * cfValue;
+                    if (govMethod == 1 || govMethod == 2) {
+                        cfEstimate += (cfValue - cfEstimate) * ccFilter * ffVar;
+                        csEstimate += (csValue - csEstimate) * ccFilter * ffVar;
+                    }
+                }
+                if (vbVar > 0.01 && hsVar > 100) {
+                    cbValue = hsvbCovar / hsVar;
+                    if (govMethod == 1 || govMethod == 2) {
+                        cbEstimate += (cbValue - cbEstimate) * ccFilter * vbVar;
+                    }
+                }
+            }
 
         ///---  End of Main Motor Governor Code ---///
 
@@ -458,6 +659,7 @@ void governorUpdate(void)
             }
             govMainPrevious = 0;
             govMain = govMainPrevious;
+            govI = 0.0;
         }
         break;
 
@@ -493,6 +695,7 @@ void governorUpdate(void)
             changeGovStateTo(GS_GOVERNOR_LOST_THROTTLE);
             govMainPrevious = 0.0;
             govMain = govMainPrevious;
+            govI = 0.0;
         }
         break;
 
@@ -515,6 +718,7 @@ void governorUpdate(void)
             govMainPrevious = 0.0;
             govMain = govMainPrevious;
         }
+        govI = 0.0;
         break;
 
     case GS_AUTOROTATION_ASSIST:
@@ -586,33 +790,9 @@ void governorUpdate(void)
         govMainPrevious = 0.0;
         govOutput[0] = 0.0;
         govOutput[1] = 0.0;
+        resetStats();
         return;
     }
-
-#ifdef DEBUG_GOV_THROTTLE
-    DEBUG_SET(DEBUG_GOVERNOR, 0, headSpeed);
-    DEBUG_SET(DEBUG_GOVERNOR, 1, throttle * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 2, govMainPrevious * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 3, govState);
-#endif
-#ifdef DEBUG_GOV_PIDSUM
-    DEBUG_SET(DEBUG_GOVERNOR, 0, govError * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 1, govP * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 2, govI * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 3, govPidSum * 1000);
-#endif
-#ifdef DEBUG_GOV_PARTS
-    DEBUG_SET(DEBUG_GOVERNOR, 0, govBaseThrottle * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 1, govFeedForward * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 2, govPidSum * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 3, govMain  * 1000);
-#endif
-#ifdef DEBUG_GOV_COMPAT
-    DEBUG_SET(DEBUG_GOVERNOR, 0, govSetpointLimited);
-    DEBUG_SET(DEBUG_GOVERNOR, 1, headSpeed);
-    DEBUG_SET(DEBUG_GOVERNOR, 2, govPidSum * 1000);
-    DEBUG_SET(DEBUG_GOVERNOR, 3, getMotorRPM(1));
-#endif
     // end of Main Motor handling
 
     // Handle the TAIL motor mixing & control
@@ -670,15 +850,68 @@ void governorUpdate(void)
             // Allow the tail motor to come to a complete stop when throttle is zero.
             govTail = constrainf(govTail, 0.0, 1.0f);
         }
-
-#ifdef DEBUG_GOV_TAIL
-        DEBUG_SET(DEBUG_GOVERNOR, 0, throttle * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 1, pidSum * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 2, govTail * 1000);
-        DEBUG_SET(DEBUG_GOVERNOR, 3, govMain * 1000);
-#endif
     }  // end of tail motor handling
 
+
+    DEBUG32U( 0, govState);
+    DEBUG32F( 1, throttle * 1e6f);
+    DEBUG32F( 2, govSetpoint * 1e3f);
+    DEBUG32F( 3, govSetpointLimited * 1e3f);
+    DEBUG32F( 4, headSpeed * 1e3f);
+    DEBUG32F( 5, govMain * 1e6f);
+    DEBUG32F( 6, govBaseThrottle * 1e6f);
+    DEBUG32F( 7, govFeedForward * 1e6f);
+    DEBUG32F( 8, govCollectiveFF * 1e6f);
+    DEBUG32F( 9, govCollectivePulseFF * 1e6f);
+    DEBUG32F(10, govCyclicFF * 1e6f);
+    DEBUG32F(11, govPidSum * 1e6f);
+    DEBUG32F(12, govError * 1e6f);
+    DEBUG32F(13, govP * 1e6f);
+    DEBUG32F(14, govI * 1e6f);
+
+    DEBUG32F(15, headSpeed * 1e3f);
+    DEBUG32F(16, hsDiff * 1e3f);
+    DEBUG32F(17, hsMean * 1e3f);
+    DEBUG32F(18, hsVar * 1e3f);
+
+    DEBUG32F(19, Vbat * 1e3f);
+    DEBUG32F(20, vbDiff * 1e3f);
+    DEBUG32F(21, vbMean * 1e3f);
+    DEBUG32F(22, vbVar * 1e3f);
+
+    DEBUG32F(23, vtValue * 1e3f);
+    DEBUG32F(24, vtDiff * 1e3f);
+    DEBUG32F(25, vtMean * 1e3f);
+    DEBUG32F(26, vtVar * 1e3f);
+
+    DEBUG32F(27, cxValue * 1e6f);
+    DEBUG32F(28, cxDiff * 1e6f);
+    DEBUG32F(29, cxMean * 1e6f);
+    DEBUG32F(30, cxVar * 1e9);
+
+    DEBUG32F(31, ffValue * 1e6f);
+    DEBUG32F(32, ffDiff * 1e6f);
+    DEBUG32F(33, ffMean * 1e6f);
+    DEBUG32F(34, ffVar * 1e9f);
+
+    DEBUG32F(35, hsvbCovar * 1e3f);
+    DEBUG32F(36, hsvtCovar * 1e9f);
+    DEBUG32F(37, cxffCovar * 1e9f);
+
+    DEBUG32F(38, ccValue * 1e3f);
+    DEBUG32F(39, csValue * 1e6f);
+    DEBUG32F(40, cfValue * 1e6f);
+    DEBUG32F(41, cbValue * 1e3f);
+
+    DEBUG32F(42, ccEstimate * 1e3f);
+    DEBUG32F(43, csEstimate * 1e6f);
+    DEBUG32F(44, cfEstimate * 1e6f);
+    DEBUG32F(45, cbEstimate * 1e3f);
+
+    DEBUG_SET(DEBUG_GOVERNOR,  0, govSetpointLimited);
+    DEBUG_SET(DEBUG_GOVERNOR,  1, headSpeed);
+    DEBUG_SET(DEBUG_GOVERNOR,  2, govPidSum * 1000.0f);
+    DEBUG_SET(DEBUG_GOVERNOR,  3, govMain * 1000.0f);
 
     govOutput[0] = govMain;
     govOutput[1] = govTail;
