@@ -22,6 +22,8 @@
 
 #include "common/time.h"
 
+#define ESC_SENSOR_TASK_FREQ_HZ 200
+
 #define ESCHW4_V_REF 3.3
 #define ESCHW4_DIFFAMP_GAIN 13.6
 #define ESCHW4_DIFFAMP_SHUNT 0.25 / 1000.0
