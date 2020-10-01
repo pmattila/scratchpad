@@ -24,8 +24,10 @@
 
 #include "debug.h"
 
-int16_t debug[DEBUG16_VALUE_COUNT];
-uint8_t debugMode;
+FAST_RAM_ZERO_INIT uint8_t debugMode;
+
+FAST_RAM_ZERO_INIT int16_t debug[DEBUG16_VALUE_COUNT];
+FAST_RAM_ZERO_INIT int32_t debug32[DEBUG32_VALUE_COUNT];
 
 #ifdef DEBUG_SECTION_TIMES
 uint32_t sectionTimes[2][4];
