@@ -46,6 +46,13 @@ typedef struct governorConfig_s {
     uint16_t gov_collective_ff_gain;
     uint16_t gov_collective_ff_impulse_gain;
     uint16_t gov_tailmotor_assist_gain;
+    uint16_t gov_vbat_filter;
+    uint16_t gov_vbat_offset;
+    uint16_t gov_ff_exponent;
+    uint16_t gov_ff_filter;
+    uint16_t gov_cb_filter;
+    uint16_t gov_st_filter;
+    uint8_t  gov_method;
 } governorConfig_t;
 
 PG_DECLARE(governorConfig_t, governorConfig);
