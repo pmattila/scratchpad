@@ -20,11 +20,21 @@
 
 #pragma once
 
-#define DEBUG16_VALUE_COUNT 4
-extern int16_t debug[DEBUG16_VALUE_COUNT];
-extern uint8_t debugMode;
+#include "platform.h"
 
-#define DEBUG_SET(mode, index, value) {if (debugMode == (mode)) {debug[(index)] = (value);}}
+#define DEBUG16_VALUE_COUNT 4
+#define DEBUG32_VALUE_COUNT 46
+
+extern FAST_RAM_ZERO_INIT int16_t debug[DEBUG16_VALUE_COUNT];
+extern FAST_RAM_ZERO_INIT int32_t debug32[DEBUG32_VALUE_COUNT];
+
+extern FAST_RAM_ZERO_INIT uint8_t debugMode;
+
+#define DEBUG_SET(mode, index, value)  do { if (debugMode == (mode)) debug[(index)] = (value); } while (0)
+
+#define DEBUG32U(index, value)  (debug32[(index)] = (uint32_t)(value))
+#define DEBUG32S(index, value)  (debug32[(index)] = (int32_t)(value))
+#define DEBUG32F(index, value)  (debug32[(index)] = lrintf(value))
 
 #define DEBUG_SECTION_TIMES
 
