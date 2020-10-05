@@ -49,6 +49,7 @@ typedef struct governorConfig_s {
     uint16_t gov_vbat_filter;
     uint16_t gov_vbat_offset;
     uint16_t gov_ff_exponent;
+    uint16_t gov_ff_estimate;
     uint16_t gov_ff_filter;
     uint16_t gov_cb_filter;
     uint16_t gov_st_filter;

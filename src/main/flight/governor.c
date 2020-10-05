@@ -72,6 +72,7 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_st_filter = 1000,
     .gov_ff_filter = 1000,
     .gov_ff_exponent = 150,
+    .gov_ff_estimate = 400,
     .gov_vbat_filter = 25,
     .gov_vbat_offset = 0,
     .gov_method = 0,
@@ -113,6 +114,7 @@ static FAST_RAM_ZERO_INIT float VbatOffset;
 static FAST_RAM_ZERO_INIT float VbatFilter;
 
 static FAST_RAM_ZERO_INIT float ffExponent;
+static FAST_RAM_ZERO_INIT float ffEstimate;
 static FAST_RAM_ZERO_INIT float ffFilter;
 static FAST_RAM_ZERO_INIT float stFilter;
 
@@ -160,7 +162,6 @@ static FAST_RAM_ZERO_INIT float cfEstimate;
 
 
 
-
 void governorInit(void)
 {
     govMaxHeadspeed  = (float)governorConfig()->gov_max_headspeed;
@@ -174,6 +175,7 @@ void governorInit(void)
     VbatFilter       = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_vbat_filter);
     VbatOffset       = (float)governorConfig()->gov_vbat_offset / 100.0f;
     ffExponent       = (float)governorConfig()->gov_ff_exponent / 100.0f;
+    ffEstimate       = (float)governorConfig()->gov_ff_estimate / 100.0f;
     ffFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_ff_filter);
     stFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
 
@@ -464,12 +466,12 @@ void governorUpdate(void)
                 if (govMethod == 1) {
                     csEstimate = cxMean;
                     ccEstimate = 0;
-                    cfEstimate = csEstimate / 4;
+                    cfEstimate = csEstimate / ffEstimate;
                 }
                 else if (govMethod == 2) {
                     csEstimate = csValue;
                     ccEstimate = ccValue;
-                    cfEstimate = csEstimate / 4;
+                    cfEstimate = csEstimate / ffEstimate;
                 }
             }
         }
@@ -538,7 +540,7 @@ void governorUpdate(void)
 #endif
             // Calculate base throttle from physics model
             if (govMethod > 0) {
-                govBaseThrottle = constrainf((govSetpointLimited * (cfEstimate * ffValue + csEstimate) + ccEstimate) / (Vbat - VbatOffset), 0.20f, 1.0f );
+                govBaseThrottle = constrainf((govSetpointLimited * (cfEstimate * ffValue + csEstimate) + ccEstimate) / (Vbat - VbatOffset), 0.20f, 0.95f );
             }
 
             // Calculate error as a percentage of the max headspeed, since 100% throttle should be close to max headspeed
@@ -551,10 +553,12 @@ void governorUpdate(void)
             // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
             govP = govKp * govError;
 
-            // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
-            govI = constrainf(govI + govKi * govError * pidGetDT(), -1.0, 1.0);
+            // Limit I-term
+            if (govMethod > 0)
+                govI = constrainf(govI + govKi * govError * pidGetDT(), -0.05f, 0.05f);
+            else
+                govI = constrainf(govI + govKi * govError * pidGetDT(), -1.0f, 1.0f);
 
-            // Governor PID sum
             govPidSum = govP + govI;
 
             // HF3D TODO:  Scale the sums based on the average battery voltage?
@@ -567,7 +571,7 @@ void governorUpdate(void)
                 govMain = govBaseThrottle + govFeedForward + govPidSum + govTailmotorAssist;
             }
             else {
-                govMain = govBaseThrottle + govPidSum;
+                govMain = govBaseThrottle + govPidSum + govTailmotorAssist;
             }
 
             // Reset any wind-up due to excess control signal
@@ -588,15 +592,17 @@ void governorUpdate(void)
             }
             govMainPrevious = govMain;
 
-            if (govMain > 0.10f && headSpeed > 100) {
-                if (ffVar > 0.001f) {
+            if (govMain > 0.1f && govMain < 0.95f && headSpeed > govMaxHeadspeed * 0.1f) {
+                if (ffVar > 0.01f)
                     cfValue = cxffCovar / ffVar;
-                    csValue = cxMean - ffMean * cfValue;
-                    if (govMethod > 0) {
-                        cfEstimate += (cfValue - cfEstimate) * ffFilter * ffVar;
-                        csEstimate += (csValue - csEstimate) * ffFilter * ffVar;
-                    }
-                }
+                else
+                    cfValue = cfEstimate;
+
+                cfValue = constrainf(cfValue, 0, csEstimate);
+                csValue = cxMean - ffMean * cfValue;
+
+                cfEstimate += (cfValue - cfEstimate) * ffFilter * ffVar;
+                csEstimate += (csValue - csEstimate) * ffFilter;
             }
 
         ///---  End of Main Motor Governor Code ---///

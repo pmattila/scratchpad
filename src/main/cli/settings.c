@@ -810,6 +810,7 @@ const clivalue_t valueTable[] = {
     { "gov_vbat_filter",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_vbat_filter) },
     { "gov_vbat_offset",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_vbat_offset) },
     { "gov_ff_exponent",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_exponent) },
+    { "gov_ff_estimate",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 10000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_estimate) },
     { "gov_ff_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_filter) },
     { "gov_st_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_st_filter) },
     { "gov_method",                 VAR_UINT8  |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 10 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_method) },
