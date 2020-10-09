@@ -811,6 +811,7 @@ const clivalue_t valueTable[] = {
     { "gov_ff_estimate",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 10000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_estimate) },
     { "gov_cs_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cs_filter) },
     { "gov_cf_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cf_filter) },
+    { "gov_cg_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cg_filter) },
     { "gov_st_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_st_filter) },
 
 // PG_SERVO_CONFIG

@@ -72,6 +72,7 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_st_filter = 1000,
     .gov_cs_filter = 1000,
     .gov_cf_filter = 1000,
+    .gov_cg_filter = 1000,
     .gov_ff_exponent = 150,
     .gov_ff_estimate = 400,
     .gov_vbat_filter = 25,
@@ -120,7 +121,9 @@ static FAST_RAM_ZERO_INIT float ffExponent;
 static FAST_RAM_ZERO_INIT float ffEstimate;
 static FAST_RAM_ZERO_INIT float csFilter;
 static FAST_RAM_ZERO_INIT float cfFilter;
+static FAST_RAM_ZERO_INIT float cgFilter;
 static FAST_RAM_ZERO_INIT float stFilter;
+static FAST_RAM_ZERO_INIT float stAlpha;
 
 static FAST_RAM_ZERO_INIT uint8_t govMethod;
 
@@ -184,7 +187,9 @@ void governorInit(void)
     vbOffset         = (float)governorConfig()->gov_vbat_offset / 100.0f;
     csFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cs_filter);
     cfFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cf_filter);
+    cgFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cg_filter);
     stFilter         = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
+    stAlpha          = (float)1.0f - stFilter;
 
     govMethod        = governorConfig()->gov_method;
 
@@ -240,7 +245,7 @@ void governorUpdate(void)
     headSpeed = getMotorRPM(0) / govGearRatio;
 
     // Current throttle
-    float throttle = mixerGetThrottle();
+    float throttle = constrainf(mixerGetThrottle() - 1e-6, 0, 1);
 
     // Output variables
     float govMain = 0.0;
@@ -296,8 +301,6 @@ void governorUpdate(void)
         // Analysis
         if (govOutput[0] > 0.10f && headSpeed > 100)
         {
-            float stAlpha = 1.0f - stFilter;
-
             vtValue = (vbMean - vbOffset - govResistance*ibMean) * govOutput[0];
             cxValue = vtValue / headSpeed;
 
@@ -311,15 +314,6 @@ void governorUpdate(void)
             cxMean += cxDiff * stFilter;
             ffMean += ffDiff * stFilter;
 
-#if 0
-            hsVar += (hsDiff * hsDiff - hsVar) * stFilter;
-            vtVar += (vtDiff * vtDiff - vtVar) * stFilter;
-            cxVar += (cxDiff * cxDiff - cxVar) * stFilter;
-            ffVar += (ffDiff * ffDiff - ffVar) * stFilter;
-
-            hsvtCovar += (hsDiff * vtDiff - hsvtCovar) * stFilter;
-            cxffCovar += (cxDiff * ffDiff - cxffCovar) * stFilter;
-#else
             hsVar = (hsDiff * hsDiff * stFilter + hsVar) * stAlpha;
             vtVar = (vtDiff * vtDiff * stFilter + vtVar) * stAlpha;
             cxVar = (cxDiff * cxDiff * stFilter + cxVar) * stAlpha;
@@ -327,7 +321,6 @@ void governorUpdate(void)
 
             hsvtCovar = (hsDiff * vtDiff * stFilter + hsvtCovar) * stAlpha;
             cxffCovar = (cxDiff * ffDiff * stFilter + cxffCovar) * stAlpha;
-#endif
         }
     }
 
@@ -480,16 +473,9 @@ void governorUpdate(void)
                     csValue = hsvtCovar / hsVar;
                     ccValue = vtMean - hsMean * csValue;
                 }
-                if (govMethod == 1) {
-                    csEstimate = cxMean;
-                    ccEstimate = 0;
-                    cfEstimate = csEstimate / ffEstimate;
-                }
-                else if (govMethod == 2) {
-                    csEstimate = csValue;
-                    ccEstimate = ccValue;
-                    cfEstimate = csEstimate / ffEstimate;
-                }
+                csEstimate = cxMean;
+                ccEstimate = 0;
+                cfEstimate = csEstimate / ffEstimate;
             }
         }
         // throttle < 0.20
@@ -618,8 +604,17 @@ void governorUpdate(void)
                 cfValue = constrainf(cfValue, 0, csEstimate);
                 csValue = cxMean - ffMean * cfValue;
 
-                cfEstimate += (cfValue - cfEstimate) * cfFilter * ffVar;
                 csEstimate += (csValue - csEstimate) * csFilter;
+
+                if (govMethod == 1) {
+                    cfEstimate += (cfValue - cfEstimate) * cfFilter * ffVar;
+                }
+                else if (govMethod == 2) {
+                    if (cfValue > cfEstimate)
+                        cfEstimate += (cfValue - cfEstimate) * cfFilter * ffVar;
+                    else
+                        cfEstimate += (cfValue - cfEstimate) * cgFilter * ffVar;
+                }
             }
 
         ///---  End of Main Motor Governor Code ---///

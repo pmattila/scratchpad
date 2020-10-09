@@ -53,6 +53,7 @@ typedef struct governorConfig_s {
     uint16_t gov_ff_estimate;
     uint16_t gov_cs_filter;
     uint16_t gov_cf_filter;
+    uint16_t gov_cg_filter;
     uint16_t gov_st_filter;
     uint8_t  gov_method;
 } governorConfig_t;
