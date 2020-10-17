@@ -23,7 +23,7 @@
 #include "platform.h"
 
 #define DEBUG16_VALUE_COUNT 4
-#define DEBUG32_VALUE_COUNT 8
+#define DEBUG32_VALUE_COUNT 44
 
 extern FAST_RAM_ZERO_INIT uint8_t debugMode;
 extern FAST_RAM_ZERO_INIT int16_t debug[DEBUG16_VALUE_COUNT];
@@ -36,6 +36,9 @@ extern FAST_RAM_ZERO_INIT int32_t debug32[DEBUG32_VALUE_COUNT];
 
 #ifdef USE_DEBUG32
 #define DEBUG32_SET(mode, index, value)   do { if (debugMode == (mode)) debug32[(index)] = (value); } while(0)
+#define DEBUG32U(index, value)  (debug32[(index)] = (uint32_t)(value))
+#define DEBUG32S(index, value)  (debug32[(index)] = (int32_t)(value))
+#define DEBUG32F(index, value)  (debug32[(index)] = lrintf(value))
 #endif
 
 #define DEBUG_SECTION_TIMES

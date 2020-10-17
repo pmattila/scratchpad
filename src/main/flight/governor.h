@@ -53,6 +53,8 @@ typedef struct governorConfig_s {
     uint8_t  gov_mode;
     uint16_t gov_max_headspeed;
     uint16_t gov_spoolup_time;
+    uint16_t gov_bailout_time;
+    uint16_t gov_auto_timeout;
     uint16_t gov_gear_ratio;
     uint16_t gov_p_gain;
     uint16_t gov_i_gain;
@@ -60,6 +62,15 @@ typedef struct governorConfig_s {
     uint16_t gov_collective_ff_gain;
     uint16_t gov_collective_ff_impulse_gain;
     uint16_t gov_tailmotor_assist_gain;
+    uint16_t gov_vbat_filter;
+    uint16_t gov_vbat_offset;
+    uint16_t gov_ff_exponent;
+    uint16_t gov_cs_filter;
+    uint16_t gov_cf_filter;
+    uint16_t gov_cg_filter;
+    uint16_t gov_st_filter;
+    uint16_t gov_pt_filter;
+    uint16_t gov_calibration[4];
 } governorConfig_t;
 
 PG_DECLARE(governorConfig_t, governorConfig);
@@ -79,6 +90,11 @@ void governorUpdate();
 
 void governorInitStandard();
 void governorUpdateStandard();
+
+void governorInitModels();
+void governorUpdateModel1();
+void governorUpdateModel2();
+void governorUpdateModel3();
 
 bool isHeliSpooledUp(void);
 

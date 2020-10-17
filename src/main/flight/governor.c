@@ -42,6 +42,8 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_mode = GM_STANDARD,
     .gov_max_headspeed = 2000,
     .gov_spoolup_time = 10,
+    .gov_bailout_time = 0,
+    .gov_auto_timeout = 0,
     .gov_gear_ratio = 1000,
     .gov_p_gain = 0,
     .gov_i_gain = 0,
@@ -49,6 +51,14 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_collective_ff_gain = 0,
     .gov_collective_ff_impulse_gain = 0,
     .gov_tailmotor_assist_gain = 0,
+    .gov_vbat_filter = 20,
+    .gov_vbat_offset = 0,
+    .gov_ff_exponent = 150,
+    .gov_cs_filter = 1000,
+    .gov_cf_filter = 1000,
+    .gov_cg_filter = 1000,
+    .gov_st_filter = 1000,
+    .gov_pt_filter = 50,
 );
 
 
@@ -74,13 +84,9 @@ void governorInit(void)
                 governorInitStandard();
                 break;
             case GM_MODEL1:
-                // Add new model here
-                break;
             case GM_MODEL2:
-                // Add new model here
-                break;
             case GM_MODEL3:
-                // Add new model here
+                governorInitModels();
                 break;
         }
     }
@@ -100,13 +106,13 @@ void governorUpdate(void)
                 governorUpdateStandard();
                 break;
             case GM_MODEL1:
-                // Add new model here
+                governorUpdateModel1();
                 break;
             case GM_MODEL2:
-                // Add new model here
+                governorUpdateModel2();
                 break;
             case GM_MODEL3:
-                // Add new model here
+                governorUpdateModel3();
                 break;
         }
     }
