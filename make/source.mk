@@ -92,6 +92,7 @@ COMMON_SRC = \
             flight/pid.c \
             flight/governor.c \
             flight/governor_std.c \
+            flight/governor_mff.c \
             flight/rpm_filter.c \
             flight/servos.c \
             flight/motors.c \
