@@ -478,7 +478,7 @@ static const char * const lookupTableEscSensorProtocol[] = {
 #endif
 
 static const char * const lookupTableGovernorMode[] = {
-    "STANDARD", "MODEL1", "MODEL2", "MODEL3"
+    "STANDARD", "MODEL1", "MODEL2", "MODEL3", "MODEL4", "MODEL5"
 };
 
 #define LOOKUP_TABLE_ENTRY(name) { name, ARRAYLEN(name) }
@@ -846,16 +846,15 @@ const clivalue_t valueTable[] = {
 #ifdef USE_HF3D_ASSISTED_TAIL
     { "gov_tailmotor_assist_gain",  VAR_UINT16 |  MASTER_VALUE, .config.minmaxUnsigned = { 0, 300 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_tailmotor_assist_gain) },
 #endif
-
-    { "gov_vbat_filter",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_vbat_filter) },
     { "gov_vbat_offset",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_vbat_offset) },
     { "gov_ff_exponent",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_exponent) },
+    { "gov_in_filter",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_in_filter) },
+    { "gov_st_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_st_filter) },
     { "gov_cs_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cs_filter) },
     { "gov_cf_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cf_filter) },
     { "gov_cg_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cg_filter) },
-    { "gov_st_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_st_filter) },
     { "gov_pt_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_pt_filter) },
-    { "gov_calibration",            VAR_UINT16  | MASTER_VALUE | MODE_ARRAY, .config.array.length = 4, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_calibration) },
+    { "gov_calibration",            VAR_UINT16  | MASTER_VALUE | MODE_ARRAY, .config.array.length = 3, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_calibration) },
 
 // PG_SERVO_CONFIG
 #ifdef USE_SERVOS

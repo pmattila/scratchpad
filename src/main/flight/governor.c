@@ -51,14 +51,14 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_collective_ff_gain = 0,
     .gov_collective_ff_impulse_gain = 0,
     .gov_tailmotor_assist_gain = 0,
-    .gov_vbat_filter = 20,
     .gov_vbat_offset = 0,
     .gov_ff_exponent = 150,
+    .gov_in_filter = 10,
+    .gov_pt_filter = 50,
     .gov_cs_filter = 1000,
     .gov_cf_filter = 1000,
     .gov_cg_filter = 1000,
     .gov_st_filter = 1000,
-    .gov_pt_filter = 50,
 );
 
 
@@ -86,6 +86,8 @@ void governorInit(void)
             case GM_MODEL1:
             case GM_MODEL2:
             case GM_MODEL3:
+            case GM_MODEL4:
+            case GM_MODEL5:
                 governorInitModels();
                 break;
         }
@@ -106,13 +108,11 @@ void governorUpdate(void)
                 governorUpdateStandard();
                 break;
             case GM_MODEL1:
-                governorUpdateModel1();
-                break;
             case GM_MODEL2:
-                governorUpdateModel2();
-                break;
             case GM_MODEL3:
-                governorUpdateModel3();
+            case GM_MODEL4:
+            case GM_MODEL5:
+                governorUpdateModels();
                 break;
         }
     }
