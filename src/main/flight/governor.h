@@ -31,6 +31,8 @@ typedef enum {
     GM_MODEL1,
     GM_MODEL2,
     GM_MODEL3,
+    GM_MODEL4,
+    GM_MODEL5,
 } govMode_e;
 
 typedef enum {
@@ -62,15 +64,15 @@ typedef struct governorConfig_s {
     uint16_t gov_collective_ff_gain;
     uint16_t gov_collective_ff_impulse_gain;
     uint16_t gov_tailmotor_assist_gain;
-    uint16_t gov_vbat_filter;
     uint16_t gov_vbat_offset;
     uint16_t gov_ff_exponent;
+    uint16_t gov_in_filter;
     uint16_t gov_cs_filter;
     uint16_t gov_cf_filter;
     uint16_t gov_cg_filter;
     uint16_t gov_st_filter;
     uint16_t gov_pt_filter;
-    uint16_t gov_calibration[4];
+    uint16_t gov_calibration[3];
 } governorConfig_t;
 
 PG_DECLARE(governorConfig_t, governorConfig);
@@ -92,9 +94,7 @@ void governorInitStandard();
 void governorUpdateStandard();
 
 void governorInitModels();
-void governorUpdateModel1();
-void governorUpdateModel2();
-void governorUpdateModel3();
+void governorUpdateModels();
 
 bool isHeliSpooledUp(void);
 

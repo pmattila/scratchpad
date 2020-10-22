@@ -31,33 +31,17 @@
 #include "config/feature.h"
 #include "config/config.h"
 
-#include "pg/motor.h"
-
-#include "drivers/dshot.h"
-#include "drivers/motor.h"
-#include "drivers/freq.h"
 #include "drivers/time.h"
-#include "drivers/io.h"
-
-#include "io/motors.h"
 
 #include "fc/runtime_config.h"
 #include "fc/rc_controls.h"
-#include "fc/rc.h"
-
-#include "rx/rx.h"
 
 #include "sensors/battery.h"
-#include "sensors/esc_sensor.h"
 
-#include "flight/rpm_filter.h"
 #include "flight/governor.h"
-#include "flight/motors.h"
 #include "flight/mixer.h"
 #include "flight/pid.h"
 
-
-static FAST_RAM_ZERO_INIT timeMs_t govStateEntryTime;
 
 static FAST_RAM_ZERO_INIT bool govRampEnabled;
 static FAST_RAM_ZERO_INIT bool govAutoEnabled;
@@ -67,8 +51,8 @@ static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
 static FAST_RAM_ZERO_INIT long  govAutoTimeout;
 
 static FAST_RAM_ZERO_INIT float govRampRate;
-static FAST_RAM_ZERO_INIT float govHSRampRate;
 static FAST_RAM_ZERO_INIT float govBailoutRate;
+static FAST_RAM_ZERO_INIT float govSetpointRate;
 
 static FAST_RAM_ZERO_INIT float govKp;
 static FAST_RAM_ZERO_INIT float govKi;
@@ -76,12 +60,12 @@ static FAST_RAM_ZERO_INIT float govCycKf;
 static FAST_RAM_ZERO_INIT float govColKf;
 static FAST_RAM_ZERO_INIT float govColPulseKf;
 
-static FAST_RAM_ZERO_INIT float govError;
-static FAST_RAM_ZERO_INIT float govI;
-static FAST_RAM_ZERO_INIT float govP;
-static FAST_RAM_ZERO_INIT float govPidSum;
-static FAST_RAM_ZERO_INIT float govFeedForward;
 static FAST_RAM_ZERO_INIT float govBaseThrottle;
+static FAST_RAM_ZERO_INIT float govFeedForward;
+static FAST_RAM_ZERO_INIT float govPidSum;
+static FAST_RAM_ZERO_INIT float govError;
+static FAST_RAM_ZERO_INIT float govP;
+static FAST_RAM_ZERO_INIT float govI;
 
 static FAST_RAM_ZERO_INIT float govCyclicFF;
 static FAST_RAM_ZERO_INIT float govCollectiveFF;
@@ -91,15 +75,19 @@ static FAST_RAM_ZERO_INIT float govSetpoint;
 static FAST_RAM_ZERO_INIT float govSetpointLimited;
 
 static FAST_RAM_ZERO_INIT float ffExponent;
-
 static FAST_RAM_ZERO_INIT float vbOffset;
-static FAST_RAM_ZERO_INIT float vbFilter;
-static FAST_RAM_ZERO_INIT float ptFilter;
+
+static FAST_RAM_ZERO_INIT float inFilter;
+static FAST_RAM_ZERO_INIT float stFilter;
 static FAST_RAM_ZERO_INIT float csFilter;
 static FAST_RAM_ZERO_INIT float cfFilter;
 static FAST_RAM_ZERO_INIT float cgFilter;
-static FAST_RAM_ZERO_INIT float stFilter;
-static FAST_RAM_ZERO_INIT float stAlpha;
+static FAST_RAM_ZERO_INIT float ptFilter;
+
+static FAST_RAM_ZERO_INIT timeMs_t govStateEntryTime;
+
+
+//// Statistics
 
 static FAST_RAM_ZERO_INIT float vbValue;
 static FAST_RAM_ZERO_INIT float vbMean;
@@ -134,9 +122,11 @@ static FAST_RAM_ZERO_INIT float ccValue;
 static FAST_RAM_ZERO_INIT float csValue;
 static FAST_RAM_ZERO_INIT float cfValue;
 
-static FAST_RAM_ZERO_INIT float ccEstimate;
 static FAST_RAM_ZERO_INIT float csEstimate;
 static FAST_RAM_ZERO_INIT float cfEstimate;
+
+
+typedef float (*throttle_f)(void);
 
 
 void governorInitModels(void)
@@ -153,7 +143,7 @@ void governorInitModels(void)
 
     govRampEnabled  = (governorConfig()->gov_spoolup_time > 0);
     govRampRate     = pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 120);
-    govHSRampRate   = govRampRate * govMaxHeadspeed;
+    govSetpointRate = govRampRate * govMaxHeadspeed;
 
     govAutoEnabled  = (governorConfig()->gov_auto_timeout > 0 && governorConfig()->gov_bailout_time > 0);
     govAutoTimeout  = governorConfig()->gov_auto_timeout * 100;
@@ -161,13 +151,13 @@ void governorInitModels(void)
 
     ffExponent      = (float)governorConfig()->gov_ff_exponent / 100.0f;
     vbOffset        = (float)governorConfig()->gov_vbat_offset / 100.0f;
-    vbFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_vbat_filter);
-    ptFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_pt_filter);
+
+    inFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_in_filter);
+    stFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
     csFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cs_filter);
     cfFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cf_filter);
     cgFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cg_filter);
-    stFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
-    stAlpha         = (float)1.0f - stFilter;
+    ptFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_pt_filter);
 }
 
 
@@ -182,9 +172,9 @@ static inline long govStateTime(void)
     return cmp32(millis(),govStateEntryTime);
 }
 
-static inline bool headSpeedValid(void)
+static inline bool headSpeedInvalid(void)
 {
-    return (govHeadSpeed > 50);
+    return (govHeadSpeed < 50 && govOutput[GOV_MAIN] > 0.20f);
 }
 
 static inline float rampUpLimit(float target, float current, float rate)
@@ -203,13 +193,21 @@ static inline float rampLimit(float target, float current, float rate)
         return MAX(current - rate, target);
 }
 
+static inline float idleMap(float throttle)
+{
+    // Map throttle in IDLE
+    //   0%..5%   -> 0%
+    //   5%..20%  -> 0%..15%
+    //   >20%     -> 15%
+    return constrainf(throttle - 0.05f, 0, 0.15f);
+}
+
 
 static void govSaveCalibration(void)
 {
-    governorConfigMutable()->gov_calibration[0] = 1e3f * ccEstimate;
+    governorConfigMutable()->gov_calibration[0] = 1e6f * csEstimate;
     governorConfigMutable()->gov_calibration[1] = 1e6f * cfEstimate;
-    governorConfigMutable()->gov_calibration[2] = 1e6f * csEstimate;
-    governorConfigMutable()->gov_calibration[3] = 1e3f * cfEstimate / csEstimate;
+    governorConfigMutable()->gov_calibration[2] = 1e3f * cfEstimate / csEstimate;
 
     saveConfigAndNotify();
 }
@@ -218,11 +216,11 @@ static void govSaveCalibration(void)
 static void govResetStats(void)
 {
     vtValue   = cxValue   = 0;
-    vtMean    = cxMean    = hsMean = 0;
-    vtDiff    = cxDiff    = hsDiff = 0;
-    vtVar     = cxVar     = hsVar  = 0;
+    ccValue   = csValue   = cfValue  = 0;
+    vtMean    = cxMean    = hsMean   = ffMean = 0;
+    vtDiff    = cxDiff    = hsDiff   = ffDiff = 0;
+    vtVar     = cxVar     = hsVar    = ffVar  = 0;
     cxffCovar = hsvtCovar = 0;
-    ccValue   = csValue   = cfValue   = 0;
 }
 
 static void govDebugStats(void)
@@ -231,58 +229,60 @@ static void govDebugStats(void)
     const float throttle = mixerGetThrottle();
     const float govMain = govOutput[GOV_MAIN];
 
-    DEBUG32U( 0, govState);
-    DEBUG32U( 1, throttleStatus);
-    DEBUG32F( 2, throttle * 1e6f);
-    DEBUG32F( 3, govSetpoint * 1e3f);
-    DEBUG32F( 4, govSetpointLimited * 1e3f);
-    DEBUG32F( 5, govHeadSpeed * 1e3f);
-    DEBUG32F( 6, govMain * 1e6f);
-    DEBUG32F( 7, govBaseThrottle * 1e6f);
-    DEBUG32F( 8, govFeedForward * 1e6f);
-    DEBUG32F( 9, govCollectiveFF * 1e6f);
-    DEBUG32F(10, govCollectivePulseFF * 1e6f);
-    DEBUG32F(11, govCyclicFF * 1e6f);
-    DEBUG32F(12, govPidSum * 1e6f);
-    DEBUG32F(13, govError * 1e6f);
-    DEBUG32F(14, govP * 1e6f);
-    DEBUG32F(15, govI * 1e6f);
+#ifdef USE_DEBUG32
+    DEBUG32U( 0, govMode);
+    DEBUG32U( 1, govState);
+    DEBUG32U( 2, throttleStatus);
+    DEBUG32F( 3, throttle * 1e6f);
+    DEBUG32F( 4, govSetpoint * 1e3f);
+    DEBUG32F( 5, govSetpointLimited * 1e3f);
+    DEBUG32F( 6, govHeadSpeed * 1e3f);
+    DEBUG32F( 7, govMain * 1e6f);
+    DEBUG32F( 8, govBaseThrottle * 1e6f);
+    DEBUG32F( 9, govFeedForward * 1e6f);
+    DEBUG32F(10, govCollectiveFF * 1e6f);
+    DEBUG32F(11, govCollectivePulseFF * 1e6f);
+    DEBUG32F(12, govCyclicFF * 1e6f);
+    DEBUG32F(13, govPidSum * 1e6f);
+    DEBUG32F(14, govError * 1e6f);
+    DEBUG32F(15, govP * 1e6f);
+    DEBUG32F(16, govI * 1e6f);
 
-    DEBUG32F(16, vbValue * 1e3f);
-    DEBUG32F(17, vbMean * 1e3f);
-    DEBUG32F(18, ibValue * 1e3f);
-    DEBUG32F(19, ibMean * 1e3f);
+    DEBUG32F(17, vbValue * 1e3f);
+    DEBUG32F(18, vbMean * 1e3f);
+    DEBUG32F(19, ibValue * 1e3f);
+    DEBUG32F(20, ibMean * 1e3f);
 
-    DEBUG32F(20, hsValue * 1e3f);
-    DEBUG32F(21, hsDiff * 1e3f);
-    DEBUG32F(22, hsMean * 1e3f);
-    DEBUG32F(23, hsVar * 1e0f);
+    DEBUG32F(21, hsValue * 1e3f);
+    DEBUG32F(22, hsDiff * 1e3f);
+    DEBUG32F(23, hsMean * 1e3f);
+    DEBUG32F(24, hsVar * 1e0f);
 
-    DEBUG32F(24, vtValue * 1e3f);
-    DEBUG32F(25, vtDiff * 1e3f);
-    DEBUG32F(26, vtMean * 1e3f);
-    DEBUG32F(27, vtVar * 1e0f);
+    DEBUG32F(25, vtValue * 1e3f);
+    DEBUG32F(26, vtDiff * 1e3f);
+    DEBUG32F(27, vtMean * 1e3f);
+    DEBUG32F(28, vtVar * 1e0f);
 
-    DEBUG32F(28, cxValue * 1e6f);
-    DEBUG32F(29, cxDiff * 1e6f);
-    DEBUG32F(30, cxMean * 1e6f);
-    DEBUG32F(31, cxVar * 1e12);
+    DEBUG32F(29, cxValue * 1e6f);
+    DEBUG32F(30, cxDiff * 1e6f);
+    DEBUG32F(31, cxMean * 1e6f);
+    DEBUG32F(32, cxVar * 1e12);
 
-    DEBUG32F(32, ffValue * 1e6f);
-    DEBUG32F(33, ffDiff * 1e6f);
-    DEBUG32F(34, ffMean * 1e6f);
-    DEBUG32F(35, ffVar * 1e6f);
+    DEBUG32F(33, ffValue * 1e6f);
+    DEBUG32F(34, ffDiff * 1e6f);
+    DEBUG32F(35, ffMean * 1e6f);
+    DEBUG32F(36, ffVar * 1e6f);
 
-    DEBUG32F(36, hsvtCovar * 1e9f);
-    DEBUG32F(37, cxffCovar * 1e9f);
+    DEBUG32F(37, hsvtCovar * 1e9f);
+    DEBUG32F(38, cxffCovar * 1e9f);
 
-    DEBUG32F(38, ccValue * 1e3f);
-    DEBUG32F(39, csValue * 1e6f);
-    DEBUG32F(40, cfValue * 1e6f);
+    DEBUG32F(39, ccValue * 1e3f);
+    DEBUG32F(40, csValue * 1e6f);
+    DEBUG32F(41, cfValue * 1e6f);
 
-    DEBUG32F(41, ccEstimate * 1e3f);
     DEBUG32F(42, csEstimate * 1e6f);
     DEBUG32F(43, cfEstimate * 1e6f);
+#endif
 
     DEBUG_SET(DEBUG_GOVERNOR,  0, govSetpointLimited);
     DEBUG_SET(DEBUG_GOVERNOR,  1, govHeadSpeed);
@@ -293,22 +293,23 @@ static void govDebugStats(void)
 
 static void govUpdateStats(void)
 {
+    float govMain = govOutput[GOV_MAIN];
+    
     // ESC voltage
     vbValue = getBatteryVoltageLatest() * 0.01f;
-    vbMean += (vbValue - vbMean) * vbFilter;
+    vbMean += (vbValue - vbMean) * inFilter;
 
     // ESC Current
     ibValue = getAmperageLatest() * 0.01f;
-    ibMean += (ibValue - ibMean) * vbFilter;
+    ibMean += (ibValue - ibMean) * inFilter;
 
-    // Smoothed headspeed
-    //hsValue = govHeadSpeed;
-    hsValue += (govHeadSpeed - hsValue) * vbFilter;
+    // Headspeed value
+    hsValue += (govHeadSpeed - hsValue) * inFilter;
 
     // Analysis
-    if (govOutput[GOV_MAIN] > 0.10f && hsValue > 100)
+    if (govMain > 0.10f && hsValue > 100)
     {
-        vtValue = (vbMean - vbOffset) * govOutput[GOV_MAIN];
+        vtValue = (vbMean - vbOffset) * govMain;
         cxValue = vtValue / hsValue;
 
         hsDiff = hsValue - hsMean;
@@ -321,13 +322,15 @@ static void govUpdateStats(void)
         cxMean += cxDiff * stFilter;
         ffMean += ffDiff * stFilter;
 
-        hsVar = (hsDiff * hsDiff * stFilter + hsVar) * stAlpha;
-        vtVar = (vtDiff * vtDiff * stFilter + vtVar) * stAlpha;
-        cxVar = (cxDiff * cxDiff * stFilter + cxVar) * stAlpha;
-        ffVar = (ffDiff * ffDiff * stFilter + ffVar) * stAlpha;
+        float tsFilter = 1.0f - stFilter;
 
-        hsvtCovar = (hsDiff * vtDiff * stFilter + hsvtCovar) * stAlpha;
-        cxffCovar = (cxDiff * ffDiff * stFilter + cxffCovar) * stAlpha;
+        hsVar = (hsDiff * hsDiff * stFilter + hsVar) * tsFilter;
+        vtVar = (vtDiff * vtDiff * stFilter + vtVar) * tsFilter;
+        cxVar = (cxDiff * cxDiff * stFilter + cxVar) * tsFilter;
+        ffVar = (ffDiff * ffDiff * stFilter + ffVar) * tsFilter;
+
+        hsvtCovar = (hsDiff * vtDiff * stFilter + hsvtCovar) * tsFilter;
+        cxffCovar = (cxDiff * ffDiff * stFilter + cxffCovar) * tsFilter;
     }
 }
 
@@ -342,11 +345,10 @@ static void govUpdateSpoolupStats(float govMain)
 
         // Initial value for Cs
         csEstimate = cxMean;
-        ccEstimate = 0;
 
         // Initial value for Cf
-        if (governorConfig()->gov_calibration[3] > 0)
-            cfEstimate = csEstimate * governorConfig()->gov_calibration[3] / 1000.0f;
+        if (governorConfig()->gov_calibration[2] > 0)
+            cfEstimate = csEstimate * governorConfig()->gov_calibration[2] / 1000.0f;
         else
             cfEstimate = csEstimate;
     }
@@ -360,8 +362,8 @@ static void govUpdateActiveStats(float govMain)
     mainCheck = (govMain > 0.25f && govMain < 0.95f);
 
     // In MODEL3, I-term must be -2.5%..2.5%
-    if (false) // (govMode == GM_MODEL3)
-        pidCheck = (govI > -0.025f && govI < 0.025f);
+    //if (govMode == GM_MODEL3)
+    //    pidCheck = (govI > -0.025f && govI < 0.025f);
 
     // Headspeed must be reasonable
     if (govMode == GM_MODEL1)
@@ -372,20 +374,21 @@ static void govUpdateActiveStats(float govMain)
     // System must stay in linear & controllable area for the stats to be correct
     if (mainCheck && pidCheck && hsCheck)
     {
-        if (ffVar > 0.001f)
+        if (ffVar > 0.01f)
             cfValue = cxffCovar / ffVar;
         else
             cfValue = cfEstimate;
 
-        cfValue = constrainf(cfValue, 0, 10*csEstimate);
+        cfValue = constrainf(cfValue, 0, 2*csEstimate);
+
+        if (cfValue > cfEstimate)
+            cfEstimate += (cfValue - cfEstimate) * ffVar * ffMean * cfFilter;
+        else
+            cfEstimate += (cfValue - cfEstimate) * ffVar * ffMean * cgFilter;
+
         csValue = cxMean - ffMean * cfValue;
 
         csEstimate += (csValue - csEstimate) * csFilter;
-
-        if (cfValue > cfEstimate)
-            cfEstimate += (cfValue - cfEstimate) * cfFilter * ffVar;
-        else
-            cfEstimate += (cfValue - cfEstimate) * cgFilter * ffVar;
     }
 }
 
@@ -404,12 +407,15 @@ static void govUpdateFeedForward(void)
     govFeedForward = govCollectiveFF + govCollectivePulseFF + govCyclicFF;
 
     // Aerodynamic drag vs angle of attack approx
-    //  -- 5x is for making this compatible with the STANDARD gov
-    ffValue = powf( 5.0f * govFeedForward, ffExponent );
+    ffValue = powf( 10.0f * govFeedForward, ffExponent );
 }
 
 
-void governorUpdateModel1(void)
+/*
+ * This is generally a throttle passthrough, but with extra stats.
+ */
+
+static void governorUpdatePassthrough(void)
 {
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
     const float throttle = mixerGetThrottle();
@@ -432,6 +438,7 @@ void governorUpdateModel1(void)
         switch (govState) {
             // throttleStatus is now HIGH, go to SPOOLING UP or ACTIVE
             case GS_THROTTLE_OFF:
+                govMain = 0;
                 if (govRampEnabled)
                     govChangeState(GS_PASSTHROUGH_SPOOLING_UP);
                 else
@@ -493,51 +500,17 @@ void governorUpdateModel1(void)
 
     // Update output variables
     govOutput[GOV_MAIN] = govMain;
-    govOutput[GOV_TAIL] = 0;
 
     // Set debug
     govDebugStats();
 }
 
 
-static float govPIControl(void)
-{
-    float govMain = 0;
+/*
+ * State machine for governed speed control
+ */
 
-    // Adjust the rate limited governor setpoint
-    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govHSRampRate);
-
-    // Calculate error ratio
-    govError = (govSetpointLimited - govHeadSpeed) / govMaxHeadspeed;
-
-    // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
-    //govP = govKp * govError;
-    govP += (govKp * govError - govP) * ptFilter;
-
-    // Make sure govI is valid
-    govI = constrainf(govI, 0, 1);
-
-    // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
-    float deltaI = constrainf(govKi * govError * pidGetDT(), 0 - govI, 1 - govI);
-
-    // Governor PID sum
-    govPidSum = govP + govI + deltaI;
-
-    // Generate new governed throttle signal
-    govMain = govPidSum + govFeedForward;
-
-    // Apply deltaI if govMain not saturated
-    if ( ! ((govMain > 1 && deltaI > 0) || (govMain < 0 && deltaI < 0)) )
-        govI += deltaI;
-
-    // Limit output to 0%..100%
-    govMain = constrainf(govMain, 0, 1);
-
-    return govMain;
-}
-
-
-void governorUpdateModel2(void)
+static void governorUpdateState(throttle_f govCalc)
 {
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
     const float throttle = mixerGetThrottle();
@@ -563,36 +536,36 @@ void governorUpdateModel2(void)
         switch (govState) {
             // throttleStatus is now HIGH, go to IDLE
             case GS_THROTTLE_OFF:
+                govMain = 0;
                 govChangeState(GS_THROTTLE_IDLE);
                 break;
 
             // Motor is idling, follow the throttle (with a limited rampup rate and offset).
             //  -- If throttle goes above 20%, move to SPOOLUP.
-            //  -- Map throttle to motor output:
-            //           0%..5%   -> motor 0%
-            //           5%..20%  -> motor 0%..15%
+            //  -- Map throttle to motor output
             case GS_THROTTLE_IDLE:
                 //govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
-                govMain = rampUpLimit(constrainf(throttle - 0.05f, 0, 0.15f), govMainPrevious, govRampRate);
+                govMain = rampUpLimit(idleMap(throttle), govMainPrevious, govRampRate);
                 if (throttle > 0.20f)
                     govChangeState(GS_GOVERNOR_SPOOLING_UP);
                 break;
 
             // Ramp up throttle until headspeed target is reached.
-            //  -- Once 97.5% headspeed reached, move to ACTIVE.
+            //  -- Once 95% headspeed reached, move to ACTIVE.
             //  -- If throttle reaches 95% before headspeed target, also move to ACTIVE.
-            //  -- If throttle <20%, move back to IDLE.
-            //  -- If no headspeed detected and throttle >20%, move to ERROR.
+            //  -- If thr95ottle <20%, move back to IDLE.
+            //  -- If no headspeed detected and throttle >20%, move to LOST_HEADSPEED.
             case GS_GOVERNOR_SPOOLING_UP:
                 govMain = rampUpLimit(0.99f, govMainPrevious, govRampRate);
-                if (!headSpeedValid() && govMain > 0.20f) {
+                if (headSpeedInvalid()) {
                     govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
                 } else if (throttle < 0.20f) {
                     govChangeState(GS_THROTTLE_IDLE);
-                } else if (govHeadSpeed > govSetpoint * 0.975f || govMain > 0.95f) {
+                } else if (govHeadSpeed > govSetpoint * 0.95f || govMain > 0.95f) {
                     govChangeState(GS_GOVERNOR_ACTIVE);
                     govSetpointLimited = govHeadSpeed;
-                    govI = govMain;
+                    govBaseThrottle = govMain;
+                    govP = govI = 0;
                 } else {
                     govUpdateSpoolupStats(govMain);
                 }
@@ -600,20 +573,20 @@ void governorUpdateModel2(void)
 
             // Governor active, maintain headspeed
             //  -- If throttle <20%, move to AUTOROTATION_CLASSIC or IDLE.
-            //  -- If no headspeed signal, move to ERROR
+            //  -- If no headspeed signal, move to LOST_HEADSPEED
             case GS_GOVERNOR_ACTIVE:
-                if (!headSpeedValid() && govMain > 0.20f) {
+                govMain = govMainPrevious;
+                if (headSpeedInvalid()) {
                     govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
                 } else if (throttle < 0.20f) {
-                    govMain = govMainPrevious;
-                    if (govStateTime() > 10000)
+                    if (govStateTime() > 15000)
                         govSaveCalibration();
                     if (govAutoEnabled && govStateTime() > 5000)
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
                 } else {
-                    govMain = govPIControl();
+                    govMain = govCalc();
                     govUpdateActiveStats(govMain);
                 }
                 break;
@@ -625,7 +598,7 @@ void governorUpdateModel2(void)
             //           0%..5%   -> motor 0%
             //           5%..20%  -> motor 0%..15%
             case GS_AUTOROTATION_CLASSIC:
-                govMain = rampUpLimit(constrainf(throttle - 0.05f, 0, 0.15f), govMainPrevious, govBailoutRate);
+                govMain = rampUpLimit(idleMap(throttle), govMainPrevious, govBailoutRate);
                 if (throttle > 0.20f)
                     govChangeState(GS_AUTOROTATION_BAILOUT);
                 else if (govStateTime() > govAutoTimeout)
@@ -633,32 +606,36 @@ void governorUpdateModel2(void)
                 break;
 
             // Ramp up throttle until target headspeed is reached, with fast(er) rampup.
-            //  -- Once 97.5% headspeed reached, move to ACTIVE.
-            //  -- If throttle reaches 95% before headspeed target, also move to ACTIVE.
+            //  -- Once 95% headspeed reached, move to ACTIVE.
+            //  -- If throttle reaches 90% before headspeed target, also move to ACTIVE.
             //  -- If throttle <20%, move back to AUTOROTATION_CLASSIC
-            //  -- If no headspeed detected and throttle >20%, move to ERROR.
+            //  -- If no headspeed detected and throttle >20%, move to LOST_HEADSPEED.
             case GS_AUTOROTATION_BAILOUT:
                 govMain = rampUpLimit(0.99f, govMainPrevious, govBailoutRate);
-                if (!headSpeedValid() && govMain > 0.20f) {
+                if (headSpeedInvalid()) {
                     govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
                 } else if (throttle < 0.20f) {
                     govChangeState(GS_AUTOROTATION_CLASSIC);
-                } else if (govHeadSpeed > govSetpoint * 0.975f || govMain > 0.95f) {
+                } else if (govHeadSpeed > govSetpoint * 0.90f || govMain > 0.95f) {
                     govChangeState(GS_GOVERNOR_ACTIVE);
                     govSetpointLimited = govHeadSpeed;
-                    govI = govMain;
+                    govBaseThrottle = govMain;
+                    govP = govI = 0;
                 }
                 break;
 
             // No headspeed signal. Very bad. Ramp down throttle.
-            //  -- Once throttle reaches 5%, move to SPOOLUP.
             //  -- If headspeed recovers, move to SPOOLUP.
             case GS_GOVERNOR_LOST_HEADSPEED:
-                govMain = rampLimit(0, govMainPrevious, govRampRate);
-                if (govMain < 0.05f)
-                    govChangeState(GS_GOVERNOR_SPOOLING_UP);
-                else if (headSpeedValid())
-                    govChangeState(GS_GOVERNOR_SPOOLING_UP);
+                govMain = rampLimit(0.20f, govMainPrevious, govRampRate);
+                if (!headSpeedInvalid()) {
+                    if (govAutoEnabled)
+                        govChangeState(GS_AUTOROTATION_BAILOUT);
+                    else
+                        govChangeState(GS_GOVERNOR_SPOOLING_UP);
+                } else if (govStateTime() > 5000) {
+                    govChangeState(GS_THROTTLE_IDLE);
+                }
                 break;
 
             // Should not be here
@@ -670,187 +647,208 @@ void governorUpdateModel2(void)
 
     // Update output variables
     govOutput[GOV_MAIN] = govMain;
-    govOutput[GOV_TAIL] = 0;
 
     // Set debug
     govDebugStats();
 }
 
 
-static float govMPIControl(void)
+
+/*
+ * Standard PIF controller
+ */
+
+static float govPIFControl(void)
 {
-    float govMain = 0;
+    float output = 0;
 
     // Adjust the rate limited governor setpoint
-    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govHSRampRate);
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
 
-    // Calculate throttle estimate from the physical model
-    float tqEstimate = cfEstimate * ffValue + csEstimate;
-    float thEstimate = (govSetpointLimited * tqEstimate + ccEstimate) / (vbMean - vbOffset);
-
-    // Set base throttle
-    govBaseThrottle = constrainf(thEstimate, 0, 0.99f);
+    // Move any base throttle to I-term
+    if (govBaseThrottle > 0) {
+        govI += govBaseThrottle;
+        govBaseThrottle = 0;
+    }
 
     // Calculate error ratio
-    govError = (govSetpointLimited - govHeadSpeed) / govMaxHeadspeed;
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
 
     // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
-    //govP = govKp * govError;
     govP += (govKp * govError - govP) * ptFilter;
 
-    // Make sure govI is valid
-    govI = constrainf(govI, -0.05f, 0.05f);
+    // PID limits
+    govP = constrainf(govP, -0.20f, 0.20f);
+    govI = constrainf(govI, -1, 1);
 
     // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
-    float deltaI = constrainf(govKi * govError * pidGetDT(), -0.05f - govI, 0.05f - govI);
+    float deltaI = govKi * govError * pidGetDT();
 
-    // Governor PID sum
+    // Governor PI sum
     govPidSum = govP + govI + deltaI;
 
     // Generate new governed throttle signal
-    govMain = govBaseThrottle + govPidSum;
+    output = govPidSum + govFeedForward;
 
-    // Apply deltaI if govMain not saturated
-    if ( ! ((govMain > 1 && deltaI > 0) || (govMain < 0 && deltaI < 0)) )
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
         govI += deltaI;
 
     // Limit output to 0%..100%
-    govMain = constrainf(govMain, 0, 1);
+    output = constrainf(output, 0, 1);
 
-    return govMain;
+    return output;
 }
 
 
-void governorUpdateModel3(void)
+/*
+ * Extended PIF controller
+ */
+
+static float govEPIFControl(void)
 {
-    const throttleStatus_e throttleStatus = calculateThrottleStatus();
-    const float throttle = mixerGetThrottle();
+    float output = 0;
 
-    float govMainPrevious = govOutput[GOV_MAIN];
-    float govMain = 0;
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
 
-    // Update headspeed target
-    govSetpoint = throttle * govMaxHeadspeed;
+    // Calculate error
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
 
-    // Calculate collective/cyclic feedforward
-    govUpdateFeedForward();
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
 
-    // Update statistics
-    govUpdateStats();
+    // PID limits
+    govP = constrainf(govP, -0.20f, 0.20f);
+    govI = constrainf(govI, -1, 1);
 
-    // Handle throttle off separately for SAFETY!
-    if (!ARMING_FLAG(ARMED) || throttleStatus == THROTTLE_LOW) {
-        govChangeState(GS_THROTTLE_OFF);
-        govResetStats();
-    }
-    else {
-        switch (govState) {
-            // throttleStatus is now HIGH, go to IDLE
-            case GS_THROTTLE_OFF:
-                govChangeState(GS_THROTTLE_IDLE);
-                break;
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
 
-            // Motor is idling, follow the throttle (with a limited rampup rate).
-            //  -- If throttle goes above 20%, move to SPOOLUP.
-            case GS_THROTTLE_IDLE:
-                govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
-                if (throttle > 0.20f)
-                    govChangeState(GS_GOVERNOR_SPOOLING_UP);
-                break;
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
 
-            // Ramp up throttle until headspeed target is reached.
-            //  -- Once 97.5% headspeed reached, move to ACTIVE.
-            //  -- If throttle reaches 95% before headspeed target, also move to ACTIVE.
-            //  -- If throttle <20%, move back to IDLE.
-            //  -- If no headspeed detected and throttle >20%, move to ERROR.
-            case GS_GOVERNOR_SPOOLING_UP:
-                govMain = rampUpLimit(0.99f, govMainPrevious, govRampRate);
-                if (!headSpeedValid() && govMain > 0.20f) {
-                    govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
-                } else if (throttle < 0.20f) {
-                    govChangeState(GS_THROTTLE_IDLE);
-                } else if (govHeadSpeed > govSetpoint * 0.975f || govMain > 0.95f) {
-                    govChangeState(GS_GOVERNOR_ACTIVE);
-                    govSetpointLimited = govHeadSpeed;
-                } else {
-                    govUpdateSpoolupStats(govMain);
-                }
-                break;
+    // Generate throttle signal
+    output = govSetpointLimited * (govPidSum + govFeedForward) * 0.005f / (vbMean - vbOffset);
 
-            // Governor active, maintain headspeed
-            //  -- If throttle <20%, move to AUTOROTATION_CLASSIC or IDLE.
-            //  -- If no headspeed signal, move to ERROR
-            case GS_GOVERNOR_ACTIVE:
-                if (!headSpeedValid() && govMain > 0.20f) {
-                    govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
-                } else if (throttle < 0.20f) {
-                    govMain = govMainPrevious;
-                    if (govStateTime() > 10000)
-                        govSaveCalibration();
-                    if (govAutoEnabled && govStateTime() > 5000)
-                        govChangeState(GS_AUTOROTATION_CLASSIC);
-                    else
-                        govChangeState(GS_THROTTLE_IDLE);
-                } else {
-                    govMain = govMPIControl();
-                    govUpdateActiveStats(govMain);
-                }
-                break;
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
 
-            // Throttle passthrough with ramup limit
-            //  -- If throttle >20%, move to AUTOROTATION_BAILOUT.
-            //  -- If timer expires, move to IDLE.
-            //  -- Map throttle to motor output:
-            //           0%..5%   -> motor 0%
-            //           5%..20%  -> motor 0%..15%
-            case GS_AUTOROTATION_CLASSIC:
-                govMain = rampUpLimit(constrainf(throttle - 0.05f, 0, 0.15f), govMainPrevious, govBailoutRate);
-                if (throttle > 0.20f)
-                    govChangeState(GS_AUTOROTATION_BAILOUT);
-                else if (govStateTime() > govAutoTimeout)
-                    govChangeState(GS_THROTTLE_IDLE);
-                break;
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
 
-            // Ramp up throttle until target headspeed is reached, with fast(er) rampup.
-            //  -- Once 97.5% headspeed reached, move to ACTIVE.
-            //  -- If throttle reaches 95% before headspeed target, also move to ACTIVE.
-            //  -- If throttle <20%, move back to AUTOROTATION_CLASSIC
-            //  -- If no headspeed detected and throttle >20%, move to ERROR.
-            case GS_AUTOROTATION_BAILOUT:
-                govMain = rampUpLimit(0.99f, govMainPrevious, govBailoutRate);
-                if (!headSpeedValid() && govMain > 0.20f) {
-                    govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
-                } else if (throttle < 0.20f) {
-                    govChangeState(GS_AUTOROTATION_CLASSIC);
-                } else if (govHeadSpeed > govSetpoint * 0.975f || govMain > 0.95f) {
-                    govChangeState(GS_GOVERNOR_ACTIVE);
-                    govSetpointLimited = govHeadSpeed;
-                }
-                break;
-
-            // No headspeed signal. Very bad. Ramp down throttle.
-            //  -- Once throttle reaches 5%, move to SPOOLUP.
-            //  -- If headspeed recovers, move to SPOOLUP.
-            case GS_GOVERNOR_LOST_HEADSPEED:
-                govMain = rampLimit(0, govMainPrevious, govRampRate);
-                if (govMain < 0.05f)
-                    govChangeState(GS_GOVERNOR_SPOOLING_UP);
-                else if (headSpeedValid())
-                    govChangeState(GS_GOVERNOR_SPOOLING_UP);
-                break;
-
-            // Should not be here
-            default:
-                govChangeState(GS_THROTTLE_OFF);
-                govResetStats();
-        }
-    }
-
-    // Update output variables
-    govOutput[GOV_MAIN] = govMain;
-    govOutput[GOV_TAIL] = 0;
-
-    // Set debug
-    govDebugStats();
+    return output;
 }
 
+
+/*
+ * This is an advanced estimator model, with system identification.
+ */
+
+static float govMEPIControl(void)
+{
+    float output = 0;
+
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
+
+    // Calculate error ratio
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
+
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
+
+    // PID limits
+    govP = constrainf(govP, -0.10f, 0.10f);
+    govI = constrainf(govI, -0.05f, 0.05f);
+
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
+
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
+
+    // Calculate throttle estimate from the model
+    float tqEstimate = cfEstimate * ffValue + csEstimate;
+    float thEstimate = (govSetpointLimited * tqEstimate) / (vbMean - vbOffset);
+
+    // Generate throttle signal
+    output = thEstimate + govPidSum;
+
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
+
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
+
+    return output;
+}
+
+
+/*
+ * This is an advanced estimator model, with system identification.
+ */
+
+static float govAEPIControl(void)
+{
+    float output = 0;
+
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
+
+    // Calculate error ratio
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
+
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
+
+    // PID limits
+    govP = constrainf(govP, -0.20f, 0.20f);
+    govI = constrainf(govI, -0.10f, 0.10f);
+
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
+
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
+
+    // Calculate throttle estimate from the model
+    float tqEstimate = cfEstimate * ffValue + csEstimate + govPidSum * 0.005f;
+    float thEstimate = (govSetpointLimited * tqEstimate) / (vbMean - vbOffset);
+
+    // Generate throttle signal
+    output = thEstimate;
+
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
+
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
+
+    return output;
+}
+
+
+void governorUpdateModels(void)
+{
+    switch (govMode) {
+        case GM_MODEL1:
+            governorUpdatePassthrough();
+            break;
+        case GM_MODEL2:
+            governorUpdateState(govPIFControl);
+            break;
+        case GM_MODEL3:
+            governorUpdateState(govEPIFControl);
+            break;
+        case GM_MODEL4:
+            governorUpdateState(govMEPIControl);
+            break;
+        case GM_MODEL5:
+            governorUpdateState(govAEPIControl);
+            break;
+    }
+}
