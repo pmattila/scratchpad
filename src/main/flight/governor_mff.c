@@ -43,7 +43,6 @@
 #include "flight/pid.h"
 
 
-static FAST_RAM_ZERO_INIT bool govRampEnabled;
 static FAST_RAM_ZERO_INIT bool govAutoEnabled;
 
 static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
@@ -141,7 +140,6 @@ void governorInitModels(void)
 
     govMaxHeadspeed = constrainf(governorConfig()->gov_max_headspeed, 100, 10000);
 
-    govRampEnabled  = (governorConfig()->gov_spoolup_time > 0);
     govRampRate     = pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 120);
     govSetpointRate = govRampRate * govMaxHeadspeed;
 
@@ -419,6 +417,7 @@ static void governorUpdatePassthrough(void)
 {
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
     const float throttle = mixerGetThrottle();
+    const bool throttleLow = (throttleStatus == THROTTLE_LOW);
 
     float govMainPrevious = govOutput[GOV_MAIN];
     float govMain = 0;
@@ -429,44 +428,72 @@ static void governorUpdatePassthrough(void)
     // Update statistics
     govUpdateStats();
 
-    // Handle throttle off separately for SAFETY!
-    if (!ARMING_FLAG(ARMED) || throttleStatus == THROTTLE_LOW) {
+    // Handle DISARM separately for SAFETY!
+    if (!ARMING_FLAG(ARMED)) {
         govChangeState(GS_THROTTLE_OFF);
         govResetStats();
     }
     else {
         switch (govState) {
-            // throttleStatus is now HIGH, go to SPOOLING UP or ACTIVE
+            // Throttle is OFF
             case GS_THROTTLE_OFF:
                 govMain = 0;
-                if (govRampEnabled)
+                if (!throttleLow)
+                    govChangeState(GS_THROTTLE_IDLE);
+                break;
+
+            // Throttle is IDLE, follow with a limited ramupup rate.
+            //  -- If NO throttle, move to THROTTLE_OFF
+            //  -- if throttle > 20%, move to SPOOLUP
+            case GS_THROTTLE_IDLE:
+                govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
+                if (throttleLow)
+                    govChangeState(GS_THROTTLE_OFF);
+                else if (govMain > 0.20f)
                     govChangeState(GS_PASSTHROUGH_SPOOLING_UP);
-                else
-                    govChangeState(GS_PASSTHROUGH_ACTIVE);
                 break;
 
             // Follow the throttle, with a limited rampup rate.
-            //  -- Once throttle is >20% and not ramping up any more, move to ACTIVE.
+            //  -- If NO throttle, move to THROTTLE_OFF
+            //  -- If 0% < throttle < 20%, stay in spoolup
+            //  -- Once throttle >20% and not ramping up, move to ACTIVE
             case GS_PASSTHROUGH_SPOOLING_UP:
                 govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
-                if (govMain >= throttle && throttle > 0.20f)
+                if (throttleLow)
+                    govChangeState(GS_THROTTLE_OFF);
+                else if (govMain < 0.20f)
+                    govChangeState(GS_THROTTLE_IDLE);
+                else if (govMain >= throttle)
                     govChangeState(GS_PASSTHROUGH_ACTIVE);
                 else
                     govUpdateSpoolupStats(govMain);
                 break;
 
             // Follow the throttle without ramp limits.
-            //  -- If throttle <20%, move to IDLE or AUTO.
+            //  -- If NO throttle, move to LOST_THROTTLE
+            //  -- If throttle <20%, move to AUTO or SPOOLING_UP
             case GS_PASSTHROUGH_ACTIVE:
                 govMain = throttle;
-                if (throttle < 0.20f && govRampEnabled) {
+                if (throttleLow)
+                    govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
+                else if (govMain < 0.20f) {
                     if (govAutoEnabled && govStateTime() > 5000)
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
-                        govChangeState(GS_PASSTHROUGH_SPOOLING_UP);
-                } else {
+                        govChangeState(GS_THROTTLE_IDLE);
+                } else
                     govUpdateActiveStats(govMain);
-                }
+                break;
+
+            // Throttle is low. If it is a mistake, give a chance to recover.
+            //  -- If throttle returns, move to AUTO
+            //  -- When timer expires, move to OFF
+            case GS_PASSTHROUGH_LOST_THROTTLE:
+                govMain = 0;
+                if (!throttleLow)
+                    govChangeState(GS_AUTOROTATION_CLASSIC);
+                else if (govStateTime() > 2000)
+                    govChangeState(GS_THROTTLE_OFF);
                 break;
 
             // Follow throttle with high(er) ramp rate.
@@ -474,10 +501,12 @@ static void governorUpdatePassthrough(void)
             //  -- If timer expires, move to IDLE.
             case GS_AUTOROTATION_CLASSIC:
                 govMain = rampUpLimit(throttle, govMainPrevious, govBailoutRate);
-                if (throttle > 0.20f)
+                if (throttleLow)
+                    govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
+                else if (govMain > 0.20f)
                     govChangeState(GS_AUTOROTATION_BAILOUT);
                 else if (govStateTime() > govAutoTimeout)
-                    govChangeState(GS_PASSTHROUGH_SPOOLING_UP);
+                    govChangeState(GS_THROTTLE_IDLE);
                 break;
 
             // Follow the throttle, with a high(er) ramp rate.
@@ -485,7 +514,9 @@ static void governorUpdatePassthrough(void)
             //  -- If throttle <20%, move back to AUTO.
             case GS_AUTOROTATION_BAILOUT:
                 govMain = rampUpLimit(throttle, govMainPrevious, govBailoutRate);
-                if (throttle < 0.20f)
+                if (throttleLow)
+                    govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
+                else if (govMain < 0.20f)
                     govChangeState(GS_AUTOROTATION_CLASSIC);
                 else if (govMain >= throttle)
                     govChangeState(GS_PASSTHROUGH_ACTIVE);
@@ -495,6 +526,7 @@ static void governorUpdatePassthrough(void)
             default:
                 govChangeState(GS_THROTTLE_OFF);
                 govResetStats();
+                break;
         }
     }
 
