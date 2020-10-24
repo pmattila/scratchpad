@@ -49,6 +49,7 @@ typedef enum {
     GS_AUTOROTATION_CLASSIC,
     GS_AUTOROTATION_ASSIST,
     GS_AUTOROTATION_BAILOUT,
+    GS_THROTTLE_RECOVERY,
 } govState_e;
 
 typedef struct governorConfig_s {
@@ -56,6 +57,7 @@ typedef struct governorConfig_s {
     uint16_t gov_max_headspeed;
     uint16_t gov_spoolup_time;
     uint16_t gov_bailout_time;
+    uint16_t gov_recovery_time;
     uint16_t gov_auto_timeout;
     uint16_t gov_gear_ratio;
     uint16_t gov_p_gain;

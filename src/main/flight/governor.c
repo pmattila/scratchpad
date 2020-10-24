@@ -43,6 +43,7 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_max_headspeed = 2000,
     .gov_spoolup_time = 10,
     .gov_bailout_time = 0,
+    .gov_recovery_time = 10,
     .gov_auto_timeout = 0,
     .gov_gear_ratio = 1000,
     .gov_p_gain = 0,
@@ -156,6 +157,7 @@ bool isHeliSpooledUp(void)
         case GS_AUTOROTATION_CLASSIC:
         case GS_AUTOROTATION_ASSIST:
         case GS_AUTOROTATION_BAILOUT:
+        case GS_THROTTLE_RECOVERY:
             return true;
     }
 

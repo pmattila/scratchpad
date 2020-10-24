@@ -43,14 +43,14 @@
 #include "flight/pid.h"
 
 
-static FAST_RAM_ZERO_INIT bool govAutoEnabled;
-
 static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
 
+static FAST_RAM_ZERO_INIT bool  govAutoEnabled;
 static FAST_RAM_ZERO_INIT long  govAutoTimeout;
 
 static FAST_RAM_ZERO_INIT float govRampRate;
 static FAST_RAM_ZERO_INIT float govBailoutRate;
+static FAST_RAM_ZERO_INIT float govRecoveryRate;
 static FAST_RAM_ZERO_INIT float govSetpointRate;
 
 static FAST_RAM_ZERO_INIT float govKp;
@@ -140,8 +140,9 @@ void governorInitModels(void)
 
     govMaxHeadspeed = constrainf(governorConfig()->gov_max_headspeed, 100, 10000);
 
-    govRampRate     = pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 120);
+    govRampRate     = pidGetDT() / constrainf(governorConfig()->gov_spoolup_time, 1, 60);
     govSetpointRate = govRampRate * govMaxHeadspeed;
+    govRecoveryRate = pidGetDT() / constrainf(governorConfig()->gov_recovery_time, 1, 50) * 10;
 
     govAutoEnabled  = (governorConfig()->gov_auto_timeout > 0 && governorConfig()->gov_bailout_time > 0);
     govAutoTimeout  = governorConfig()->gov_auto_timeout * 100;
@@ -449,7 +450,7 @@ static void governorUpdatePassthrough(void)
                 govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
                 if (throttleLow)
                     govChangeState(GS_THROTTLE_OFF);
-                else if (govMain > 0.20f)
+                else if (throttle > 0.20f)
                     govChangeState(GS_PASSTHROUGH_SPOOLING_UP);
                 break;
 
@@ -461,7 +462,7 @@ static void governorUpdatePassthrough(void)
                 govMain = rampUpLimit(throttle, govMainPrevious, govRampRate);
                 if (throttleLow)
                     govChangeState(GS_THROTTLE_OFF);
-                else if (govMain < 0.20f)
+                else if (throttle < 0.20f)
                     govChangeState(GS_THROTTLE_IDLE);
                 else if (govMain >= throttle)
                     govChangeState(GS_PASSTHROUGH_ACTIVE);
@@ -477,7 +478,7 @@ static void governorUpdatePassthrough(void)
                 if (throttleLow)
                     govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
                 else if (govMain < 0.20f) {
-                    if (govAutoEnabled && govStateTime() > 5000)
+                    if (govAutoEnabled && govStateTime() > 5000) // TODO
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
@@ -486,38 +487,51 @@ static void governorUpdatePassthrough(void)
                 break;
 
             // Throttle is low. If it is a mistake, give a chance to recover.
-            //  -- If throttle returns, move to AUTO
+            //  -- If throttle returns, move to RECOVERY
             //  -- When timer expires, move to OFF
             case GS_PASSTHROUGH_LOST_THROTTLE:
                 govMain = 0;
                 if (!throttleLow)
-                    govChangeState(GS_AUTOROTATION_CLASSIC);
-                else if (govStateTime() > 2000)
+                    govChangeState(GS_THROTTLE_RECOVERY);
+                else if (govStateTime() > 2000) // TODO
                     govChangeState(GS_THROTTLE_OFF);
                 break;
 
             // Follow throttle with high(er) ramp rate.
-            //  -- If throttle is >20%, move to AUTOROTATION_BAILOUT.
-            //  -- If timer expires, move to IDLE.
+            //  -- If throttle is >20%, move to AUTOROTATION_BAILOUT
+            //  -- If timer expires, move to IDLE
             case GS_AUTOROTATION_CLASSIC:
                 govMain = rampUpLimit(throttle, govMainPrevious, govBailoutRate);
                 if (throttleLow)
                     govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
-                else if (govMain > 0.20f)
+                else if (throttle > 0.20f)
                     govChangeState(GS_AUTOROTATION_BAILOUT);
                 else if (govStateTime() > govAutoTimeout)
                     govChangeState(GS_THROTTLE_IDLE);
                 break;
 
             // Follow the throttle, with a high(er) ramp rate.
-            //  -- Once throttle is not ramping up any more, move to ACTIVE.
-            //  -- If throttle <20%, move back to AUTO.
+            //  -- Once throttle is not ramping up any more, move to ACTIVE
+            //  -- If throttle <20%, move back to AUTO
             case GS_AUTOROTATION_BAILOUT:
                 govMain = rampUpLimit(throttle, govMainPrevious, govBailoutRate);
                 if (throttleLow)
                     govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
-                else if (govMain < 0.20f)
+                else if (throttle < 0.20f)
                     govChangeState(GS_AUTOROTATION_CLASSIC);
+                else if (govMain >= throttle)
+                    govChangeState(GS_PASSTHROUGH_ACTIVE);
+                break;
+
+            // Follow the throttle, with a high(er) ramp rate.
+            //  -- Once throttle is not ramping up any more, move to ACTIVE
+            //  -- If throttle <20%, move to IDLE
+            case GS_THROTTLE_RECOVERY:
+                govMain = rampUpLimit(throttle, govMainPrevious, govRecoveryRate);
+                if (throttleLow)
+                    govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
+                else if (throttle < 0.20f)
+                    govChangeState(GS_THROTTLE_IDLE);
                 else if (govMain >= throttle)
                     govChangeState(GS_PASSTHROUGH_ACTIVE);
                 break;
@@ -589,8 +603,9 @@ static void governorUpdateState(throttle_f govCalc)
             // Ramp up throttle until headspeed target is reached.
             //  -- Once 95% headspeed reached, move to ACTIVE.
             //  -- If throttle reaches 95% before headspeed target, also move to ACTIVE.
-            //  -- If throttle <20%, move back to IDLE.
             //  -- If no headspeed detected and throttle >20%, move to LOST_HEADSPEED.
+            //  -- If throttle <20%, move back to IDLE.
+            //  -- If NO throttle, move to THROTTLE_OFF
             case GS_GOVERNOR_SPOOLING_UP:
                 govMain = rampUpLimit(0.99f, govMainPrevious, govRampRate);
                 if (throttleLow)
@@ -621,7 +636,7 @@ static void governorUpdateState(throttle_f govCalc)
                 else if (throttle < 0.20f) {
                     if (govStateTime() > 10000) // TODO
                         govSaveCalibration();
-                    if (govAutoEnabled && govStateTime() > 5000)
+                    if (govAutoEnabled && govStateTime() > 5000) // TODO
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
@@ -637,25 +652,22 @@ static void governorUpdateState(throttle_f govCalc)
             case GS_GOVERNOR_LOST_THROTTLE:
                 govMain = 0;
                 if (!throttleLow)
-                    govChangeState(GS_AUTOROTATION_CLASSIC);
-                else if (govStateTime() > 2000)
+                    govChangeState(GS_THROTTLE_RECOVERY);
+                else if (govStateTime() > 2000) // TODO
                     govChangeState(GS_THROTTLE_OFF);
                 break; 
 
             // No headspeed signal. Ramp down throttle.
             //  -- If NO throttle, move to LOST_THROTTLE
-            //  -- If headspeed recovers, move to BAILOUT
+            //  -- If headspeed recovers, move to RECOVERY
             //  -- When timer expires, move to IDLE
             case GS_GOVERNOR_LOST_HEADSPEED:
                 govMain = rampLimit(0.20f, govMainPrevious, govRampRate);
                 if (throttleLow)
                     govChangeState(GS_GOVERNOR_LOST_THROTTLE);
-                else if (!headSpeedInvalid()) {
-                    if (govAutoEnabled)
-                        govChangeState(GS_AUTOROTATION_BAILOUT);
-                    else
-                        govChangeState(GS_GOVERNOR_SPOOLING_UP);
-                } else if (govStateTime() > 5000)
+                else if (!headSpeedInvalid())
+                    govChangeState(GS_THROTTLE_RECOVERY);
+                else if (govStateTime() > 1000) // TODO
                     govChangeState(GS_THROTTLE_IDLE);
                 break;
 
@@ -696,6 +708,19 @@ static void governorUpdateState(throttle_f govCalc)
                     govBaseThrottle = govMain;
                     govP = govI = 0;
                 }
+                break;
+
+            // Follow the throttle, with a high(er) ramp rate.
+            //  -- Once throttle is not ramping up any more, move to ACTIVE
+            //  -- If throttle <20%, move to IDLE
+            case GS_THROTTLE_RECOVERY:
+                govMain = rampUpLimit(throttle, govMainPrevious, govRecoveryRate);
+                if (throttleLow)
+                    govChangeState(GS_GOVERNOR_LOST_THROTTLE);
+                else if (throttle < 0.20f)
+                    govChangeState(GS_THROTTLE_IDLE);
+                else if (govMain >= throttle)
+                    govChangeState(GS_GOVERNOR_ACTIVE);
                 break;
 
             // Should not be here
