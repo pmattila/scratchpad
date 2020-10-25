@@ -92,6 +92,10 @@ static FAST_RAM_ZERO_INIT timeMs_t govStateEntryTime;
 
 //// Statistics
 
+static FAST_RAM_ZERO_INIT uint32_t stCount;
+static FAST_RAM_ZERO_INIT uint32_t stActiveCount;
+static FAST_RAM_ZERO_INIT uint32_t stSpoolupCount;
+
 static FAST_RAM_ZERO_INIT float vbValue;
 static FAST_RAM_ZERO_INIT float vbMean;
 
@@ -220,7 +224,6 @@ static void govSaveCalibration(void)
     saveConfigAndNotify();
 }
 
-
 static void govResetStats(void)
 {
     vtValue   = cxValue   = 0;
@@ -229,6 +232,7 @@ static void govResetStats(void)
     vtDiff    = cxDiff    = hsDiff   = ffDiff = 0;
     vtVar     = cxVar     = hsVar    = ffVar  = 0;
     cxffCovar = hsvtCovar = 0;
+    stCount = stActiveCount = stSpoolupCount = 0;
 }
 
 static void govDebugStats(void)
@@ -302,7 +306,10 @@ static void govDebugStats(void)
 static void govUpdateStats(void)
 {
     float govMain = govOutput[GOV_MAIN];
-    
+
+    // Increment statistics count
+    stCount++;
+
     // ESC voltage
     vbValue = getBatteryVoltageLatest() * 0.01f;
     vbMean += (vbValue - vbMean) * inFilter;
@@ -345,6 +352,9 @@ static void govUpdateStats(void)
 static void govUpdateSpoolupStats(float govMain)
 {
     if (govMain > 0.10f && govHeadSpeed > 100) {
+        // Increment statistics count
+        stSpoolupCount++;
+
         // For analysis -- not used in the model
         if (hsVar > 100) {
             csValue = hsvtCovar / hsVar;
@@ -365,6 +375,9 @@ static void govUpdateSpoolupStats(float govMain)
 static void govUpdateActiveStats(float govMain)
 {
     bool mainCheck = true, pidCheck = true, hsCheck = true;
+
+    // Increment statistics count
+    stActiveCount++;
 
     // throttle must be between 25%..95%
     mainCheck = (govMain > 0.25f && govMain < 0.95f);
@@ -595,6 +608,10 @@ static void governorUpdateState(throttle_f govCalc)
                 govMain = 0;
                 if (!throttleLow)
                     govChangeState(GS_THROTTLE_IDLE);
+                if (stActiveCount > pidGetPidFrequency() * 30) {
+                    govSaveCalibration();
+                    govResetStats();
+                }
                 break;
 
             // Throttle is IDLE, follow with a limited ramupup rate.
@@ -643,8 +660,6 @@ static void governorUpdateState(throttle_f govCalc)
                 else if (headSpeedInvalid())
                     govChangeState(GS_GOVERNOR_LOST_HEADSPEED);
                 else if (throttle < 0.20f) {
-                    if (govStateTime() > 10000) // TODO
-                        govSaveCalibration();
                     if (govAutoEnabled && govStateTime() > govAutoMinEntry)
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
