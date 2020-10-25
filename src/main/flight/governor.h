@@ -56,16 +56,18 @@ typedef struct governorConfig_s {
     uint8_t  gov_mode;
     uint16_t gov_max_headspeed;
     uint16_t gov_spoolup_time;
-    uint16_t gov_bailout_time;
     uint16_t gov_recovery_time;
-    uint16_t gov_auto_timeout;
+    uint16_t gov_autorotation_timeout;
+    uint16_t gov_autorotation_bailout_time;
+    uint16_t gov_autorotation_min_entry_time;
+    uint16_t gov_lost_throttle_timeout;
+    uint16_t gov_lost_headspeed_timeout;
     uint16_t gov_gear_ratio;
     uint16_t gov_p_gain;
     uint16_t gov_i_gain;
     uint16_t gov_cyclic_ff_gain;
     uint16_t gov_collective_ff_gain;
     uint16_t gov_collective_ff_impulse_gain;
-    uint16_t gov_tailmotor_assist_gain;
     uint16_t gov_vbat_offset;
     uint16_t gov_ff_exponent;
     uint16_t gov_in_filter;
@@ -75,6 +77,7 @@ typedef struct governorConfig_s {
     uint16_t gov_st_filter;
     uint16_t gov_pt_filter;
     uint16_t gov_calibration[3];
+    uint16_t gov_tailmotor_assist_gain;
 } governorConfig_t;
 
 PG_DECLARE(governorConfig_t, governorConfig);

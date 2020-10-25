@@ -841,11 +841,11 @@ const clivalue_t valueTable[] = {
     { "gov_collective_ff_gain",     VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 500 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_collective_ff_gain) },
     { "gov_collective_ff_impulse_gain",  VAR_UINT16 |  MASTER_VALUE, .config.minmaxUnsigned = { 0, 500 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_collective_ff_impulse_gain) },
     { "gov_spoolup_time",           VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 60 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_spoolup_time) },
-    { "gov_bailout_time",           VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_bailout_time) },
-    { "gov_autorotation_timeout",   VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_auto_timeout) },
-#ifdef USE_HF3D_ASSISTED_TAIL
-    { "gov_tailmotor_assist_gain",  VAR_UINT16 |  MASTER_VALUE, .config.minmaxUnsigned = { 0, 300 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_tailmotor_assist_gain) },
-#endif
+    { "gov_autorotation_timeout",   VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_autorotation_timeout) },
+    { "gov_autorotation_bailout_time", VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_autorotation_bailout_time) },
+    { "gov_autorotation_min_entry_time", VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_autorotation_min_entry_time) },
+    { "gov_lost_throttle_timeout",  VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_lost_throttle_timeout) },
+    { "gov_lost_headspeed_timeout", VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 100 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_lost_headspeed_timeout) },
     { "gov_vbat_offset",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_vbat_offset) },
     { "gov_ff_exponent",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_ff_exponent) },
     { "gov_in_filter",            VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 1000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_in_filter) },
@@ -855,6 +855,10 @@ const clivalue_t valueTable[] = {
     { "gov_cg_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_cg_filter) },
     { "gov_pt_filter",              VAR_UINT16 |  MASTER_VALUE,  .config.minmaxUnsigned = { 1, 60000 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_pt_filter) },
     { "gov_calibration",            VAR_UINT16  | MASTER_VALUE | MODE_ARRAY, .config.array.length = 3, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_calibration) },
+
+#ifdef USE_HF3D_ASSISTED_TAIL
+    { "gov_tailmotor_assist_gain",  VAR_UINT16 |  MASTER_VALUE, .config.minmaxUnsigned = { 0, 300 }, PG_GOVERNOR_CONFIG, offsetof(governorConfig_t, gov_tailmotor_assist_gain) },
+#endif
 
 // PG_SERVO_CONFIG
 #ifdef USE_SERVOS

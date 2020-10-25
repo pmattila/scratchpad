@@ -47,6 +47,10 @@ static FAST_RAM_ZERO_INIT float govMaxHeadspeed;
 
 static FAST_RAM_ZERO_INIT bool  govAutoEnabled;
 static FAST_RAM_ZERO_INIT long  govAutoTimeout;
+static FAST_RAM_ZERO_INIT long  govAutoMinEntry;
+
+static FAST_RAM_ZERO_INIT long  govLostThrottleTimeout;
+static FAST_RAM_ZERO_INIT long  govLostHeadspeedTimeout;
 
 static FAST_RAM_ZERO_INIT float govRampRate;
 static FAST_RAM_ZERO_INIT float govBailoutRate;
@@ -144,19 +148,24 @@ void governorInitModels(void)
     govSetpointRate = govRampRate * govMaxHeadspeed;
     govRecoveryRate = pidGetDT() / constrainf(governorConfig()->gov_recovery_time, 1, 50) * 10;
 
-    govAutoEnabled  = (governorConfig()->gov_auto_timeout > 0 && governorConfig()->gov_bailout_time > 0);
-    govAutoTimeout  = governorConfig()->gov_auto_timeout * 100;
-    govBailoutRate  = pidGetDT() / constrainf(governorConfig()->gov_bailout_time, 1, 100) * 10;
+    govAutoEnabled  = (governorConfig()->gov_autorotation_timeout > 0 &&
+                       governorConfig()->gov_autorotation_bailout_time > 0);
+    govBailoutRate  = pidGetDT() / constrainf(governorConfig()->gov_autorotation_bailout_time, 1, 100) * 10;
+    govAutoTimeout  = governorConfig()->gov_autorotation_timeout * 100;
+    govAutoMinEntry = governorConfig()->gov_autorotation_min_entry_time * 1000;
 
-    ffExponent      = (float)governorConfig()->gov_ff_exponent / 100.0f;
-    vbOffset        = (float)governorConfig()->gov_vbat_offset / 100.0f;
+    govLostThrottleTimeout  = governorConfig()->gov_lost_throttle_timeout * 100;
+    govLostHeadspeedTimeout = governorConfig()->gov_lost_headspeed_timeout * 100;
 
-    inFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_in_filter);
-    stFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
-    csFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cs_filter);
-    cfFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cf_filter);
-    cgFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cg_filter);
-    ptFilter        = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_pt_filter);
+    ffExponent = (float)governorConfig()->gov_ff_exponent / 100.0f;
+    vbOffset   = (float)governorConfig()->gov_vbat_offset / 100.0f;
+
+    inFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_in_filter);
+    stFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
+    csFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cs_filter);
+    cfFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cf_filter);
+    cgFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cg_filter);
+    ptFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_pt_filter);
 }
 
 
@@ -478,7 +487,7 @@ static void governorUpdatePassthrough(void)
                 if (throttleLow)
                     govChangeState(GS_PASSTHROUGH_LOST_THROTTLE);
                 else if (govMain < 0.20f) {
-                    if (govAutoEnabled && govStateTime() > 5000) // TODO
+                    if (govAutoEnabled && govStateTime() > govAutoMinEntry)
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
@@ -493,7 +502,7 @@ static void governorUpdatePassthrough(void)
                 govMain = 0;
                 if (!throttleLow)
                     govChangeState(GS_THROTTLE_RECOVERY);
-                else if (govStateTime() > 2000) // TODO
+                else if (govStateTime() > govLostThrottleTimeout)
                     govChangeState(GS_THROTTLE_OFF);
                 break;
 
@@ -636,7 +645,7 @@ static void governorUpdateState(throttle_f govCalc)
                 else if (throttle < 0.20f) {
                     if (govStateTime() > 10000) // TODO
                         govSaveCalibration();
-                    if (govAutoEnabled && govStateTime() > 5000) // TODO
+                    if (govAutoEnabled && govStateTime() > govAutoMinEntry)
                         govChangeState(GS_AUTOROTATION_CLASSIC);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
@@ -653,7 +662,7 @@ static void governorUpdateState(throttle_f govCalc)
                 govMain = 0;
                 if (!throttleLow)
                     govChangeState(GS_THROTTLE_RECOVERY);
-                else if (govStateTime() > 2000) // TODO
+                else if (govStateTime() > govLostThrottleTimeout)
                     govChangeState(GS_THROTTLE_OFF);
                 break; 
 
@@ -667,7 +676,7 @@ static void governorUpdateState(throttle_f govCalc)
                     govChangeState(GS_GOVERNOR_LOST_THROTTLE);
                 else if (!headSpeedInvalid())
                     govChangeState(GS_THROTTLE_RECOVERY);
-                else if (govStateTime() > 1000) // TODO
+                else if (govStateTime() > govLostHeadspeedTimeout)
                     govChangeState(GS_THROTTLE_IDLE);
                 break;
 
