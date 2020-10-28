@@ -457,7 +457,8 @@ static void governorUpdatePassthrough(void)
         govResetStats();
     }
     else {
-        switch (govState) {
+        switch (govState)
+        {
             // Throttle is OFF
             case GS_THROTTLE_OFF:
                 govMain = 0;
@@ -602,7 +603,8 @@ static void governorUpdateState(throttle_f govCalc)
         govResetStats();
     }
     else {
-        switch (govState) {
+        switch (govState)
+        {
             // Throttle is OFF
             case GS_THROTTLE_OFF:
                 govMain = 0;
@@ -788,7 +790,7 @@ static float govPIFControl(void)
 
     // PID limits
     govP = constrainf(govP, -0.20f, 0.20f);
-    govI = constrainf(govI, -1, 1);
+    govI = constrainf(govI, -1.00f, 1.00f);
 
     // if gov_i_gain = 10 (govKi = 1), we will get 1% change in throttle for 1% error in headspeed after 1 second
     float deltaI = govKi * govError * pidGetDT();
@@ -829,7 +831,7 @@ static float govEPIFControl(void)
 
     // PID limits
     govP = constrainf(govP, -0.20f, 0.20f);
-    govI = constrainf(govI, -1, 1);
+    govI = constrainf(govI, -1.00f, 1.00f);
 
     // I-term change
     float deltaI = govKi * govError * pidGetDT();
