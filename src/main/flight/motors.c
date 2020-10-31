@@ -193,7 +193,7 @@ void motorInit(void)
     initEscEndpoints();
     motorResetDisarmed();
 
-    motorCount = MIN(mixerGetActiveMotors(), MAX_SUPPORTED_MOTORS);
+    motorCount = constrain(mixerGetActiveMotors(), 1, MAX_SUPPORTED_MOTORS);
 
     motorDevInit(&motorConfig()->dev, motorOutputStop, motorCount);
 }
