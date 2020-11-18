@@ -22,6 +22,7 @@
 #define DEFAULT_SERVO_MIN     1000
 #define DEFAULT_SERVO_MAX     2000
 #define DEFAULT_SERVO_CENTER  1500
+#define DEFAULT_SERVO_TRIM    0
 #define DEFAULT_SERVO_RATE    1000
 #define DEFAULT_SERVO_SPEED   0
 #define DEFAULT_SERVO_UPDATE  50
@@ -34,6 +35,7 @@ typedef struct servoParam_s {
     int16_t min;    // servo min
     int16_t max;    // servo max
     int16_t mid;    // servo midpoint
+    int16_t trim;   // range [-250;+250] ; can be used to set the center trim of the servo
     int16_t rate;   // range [-1000;+1000] ; can be used to adjust a rate 0-2000%% and a direction
     int16_t speed;  // servo speed limit
 } servoParam_t;
