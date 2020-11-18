@@ -70,10 +70,11 @@ void pgResetFn_servoParams(servoParam_t *instance)
 {
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         RESET_CONFIG(servoParam_t, &instance[i],
-                     .min  = DEFAULT_SERVO_MIN,
-                     .max  = DEFAULT_SERVO_MAX,
-                     .mid  = DEFAULT_SERVO_CENTER,
-                     .rate = DEFAULT_SERVO_RATE,
+                     .min   = DEFAULT_SERVO_MIN,
+                     .max   = DEFAULT_SERVO_MAX,
+                     .mid   = DEFAULT_SERVO_CENTER,
+                     .trim  = DEFAULT_SERVO_TRIM,
+                     .rate  = DEFAULT_SERVO_RATE,
                      .speed = DEFAULT_SERVO_SPEED,
         );
     }
@@ -125,10 +126,12 @@ void servoUpdate(void)
 
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++)
     {
+        float trim = (servoParams(i)->rate >= 0) ? servoParams(i)->trim : -servoParams(i)->trim;
+
         if (!ARMING_FLAG(ARMED) && servoOverride[i] != SERVO_OVERRIDE_OFF)
             pwm = servoOverride[i];
         else
-            pwm = servoParams(i)->mid + (mixerGetServoOutput(i) * servoParams(i)->rate / 2);
+            pwm = servoParams(i)->mid + trim + (mixerGetServoOutput(i) * servoParams(i)->rate / 2);
 
         if (servoSpeedLimit[i] > 0)
             pwm = limitSlewRate(servoOutput[i], pwm, servoSpeedLimit[i]);
