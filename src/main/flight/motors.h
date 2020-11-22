@@ -20,44 +20,38 @@
 #include "platform.h"
 
 
-typedef enum {
-    RPM_SRC_NONE = 0,
-    RPM_SRC_DSHOT_TELEM,
-    RPM_SRC_FREQ_SENSOR,
-    RPM_SRC_ESC_SENSOR,
-} rpmSource_e;
-
-
-extern uint8_t motorCount;
-
-extern float motor[];
-
-extern float motorOutputLow;
-extern float motorOutputHigh;
-extern float motorOutputStop;
-extern float motorOutputRange;
-
-
 uint8_t getMotorCount(void);
 
-bool isRpmSourceActive(void);
+float getMotorOutput(uint8_t motor);
+
+float getMotorOverride(uint8_t motor);
+uint16_t getMotorOutputExt(uint8_t motor);
+
+void setMotorOverride(uint8_t motor, float value);
+void setMotorOverrideExt(uint8_t motor, uint16_t value);
+
+void resetMotorOverride(void);
+
 bool areMotorsRunning(void);
 
+bool isRpmSourceActive(void);
+
 int getMotorRPM(uint8_t motor);
+float getMotorRPMf(uint8_t motor);
+
 int calcMotorRpm(uint8_t motor, int erpm);
+float calcMotorRpmf(uint8_t motor, int erpm);
 
 void rpmSourceInit(void);
-
-void initEscEndpoints(void);
 
 void motorInit(void);
 void motorStop(void);
 void motorUpdate(void);
 
-void motorResetDisarmed(void);
-void motorSetDisarmed(uint8_t motor, uint32_t value);
-
-float getHeadSpeed(void);
-
 static inline void stopMotors(void) { motorStop(); }
+
+static inline void initEscEndpoints(void) { }
+
+static inline float getHeadSpeed(void) { return 0; }
 static inline float getMotorMixRange(void) { return 1.0f; }
+

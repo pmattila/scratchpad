@@ -103,12 +103,6 @@ typedef struct mixer_s
 PG_DECLARE_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules);
 
 
-extern FAST_RAM_ZERO_INIT uint8_t mixerActiveServos;
-extern FAST_RAM_ZERO_INIT uint8_t mixerActiveMotors;
-
-extern FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
-
-
 void mixerInit(void);
 void mixerInitProfile(void);
 
@@ -118,10 +112,13 @@ float mixerGetInput(uint8_t i);
 float mixerGetServoOutput(uint8_t i);
 float mixerGetMotorOutput(uint8_t i);
 
+uint8_t mixerGetActiveServos(void);
+uint8_t mixerGetActiveMotors(void);
+
+int16_t mixerGetOverride(uint8_t i);
+int16_t mixerSetOverride(uint8_t i, int16_t value);
+
 float getCyclicDeflection(void);
 
-#define mixerGetThrottle()      mixerGetInput(MIXER_IN_STABILIZED_THROTTLE)
-
-#define mixerGetActiveServos()  (mixerActiveServos)
-#define mixerGetActiveMotors()  (mixerActiveMotors)
+static inline float mixerGetThrottle(void) { return mixerGetInput(MIXER_IN_STABILIZED_THROTTLE); }
 

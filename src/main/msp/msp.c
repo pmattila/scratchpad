@@ -78,11 +78,14 @@
 #include "fc/runtime_config.h"
 
 #include "flight/failsafe.h"
-#include "flight/position.h"
 #include "flight/gps_rescue.h"
 #include "flight/imu.h"
 #include "flight/pid.h"
 #include "flight/mixer.h"
+#include "flight/motors.h"
+#include "flight/servos.h"
+#include "flight/position.h"
+#include "flight/rpm_filter.h"
 
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/beeper.h"
@@ -677,7 +680,7 @@ static bool mspCommonProcessOutCommand(int16_t cmdMSP, sbuf_t *dst, mspPostProce
         }
 #endif
 
-        if (!checkMotorProtocolEnabled(&motorConfig()->dev, NULL)) {
+        if (!checkMotorProtocolEnabled(&motorConfig()->dev)) {
             configurationProblems |= BIT(PROBLEM_MOTOR_PROTOCOL_DISABLED);
         }
 
@@ -1062,16 +1065,18 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
 
 #ifdef USE_SERVOS
     case MSP_SERVO:
-        sbufWriteData(dst, servo, sizeof(servo));
+        for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
+            sbufWriteU16(dst, getServoOutput(i));
+        }
         break;
+
     case MSP_SERVO_CONFIGURATIONS:
         for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
             sbufWriteU16(dst, servoParams(i)->min);
             sbufWriteU16(dst, servoParams(i)->max);
             sbufWriteU16(dst, servoParams(i)->mid);
-            sbufWriteU8(dst, servoParams(i)->rate / 10);
-            sbufWriteU8(dst, 0);  // servoParams(i)->forwardFromChannel);
-            sbufWriteU32(dst, 0); // servoParams(i)->reversedSources);
+            sbufWriteU16(dst, servoParams(i)->rate);
+            sbufWriteU16(dst, servoParams(i)->speed);
         }
         break;
 #endif
@@ -1080,7 +1085,7 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
         for (int i = 0; i < 8; i++) {
 #ifdef USE_MOTOR
             if (motorIsEnabled() && i < MAX_SUPPORTED_MOTORS && motorIsMotorEnabled(i))
-                sbufWriteU16(dst, motorConvertToExternal(motor[i]));
+                sbufWriteU16(dst, getMotorOutputExt(i) + 1000); // HF3D: Compat
             else
 #endif
                 sbufWriteU16(dst, 0);
@@ -1846,7 +1851,6 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
 
         break;
 #endif
-
     default:
         unsupportedCommand = true;
     }
@@ -2294,7 +2298,7 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
 
     case MSP_SET_MOTOR:
         for (int i = 0; i < getMotorCount(); i++) {
-            motorSetDisarmed(i, motorConvertFromExternal(sbufReadU16(src)));
+            setMotorOverrideExt(i, sbufReadU16(src) - 1000); // HF3D: Compat
         }
         break;
 
@@ -2310,12 +2314,11 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
             servoParamsMutable(i)->min = sbufReadU16(src);
             servoParamsMutable(i)->max = sbufReadU16(src);
             servoParamsMutable(i)->mid = sbufReadU16(src);
-            servoParamsMutable(i)->rate = sbufReadU8(src)  * 10;
-            sbufReadU8(src);   // servoParamsMutable(i)->forwardFromChannel = sbufReadU8(src);
-            sbufReadU32(src);  // servoParamsMutable(i)->reversedSources = sbufReadU32(src);
+            servoParamsMutable(i)->rate = sbufReadU16(src);
+            servoParamsMutable(i)->speed = sbufReadU16(src);
         }
-        break;
 #endif
+        break;
 
     case MSP_SET_RC_DEADBAND:
         rcControlsConfigMutable()->deadband = sbufReadU8(src);
