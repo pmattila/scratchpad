@@ -476,9 +476,8 @@ static bool bbUpdateStart(void)
             if (value != BB_INVALID) {
                 dshotTelemetryState.motorState[motorIndex].telemetryValue = value;
                 dshotTelemetryState.motorState[motorIndex].telemetryActive = true;
-                if (motorIndex < 2) {
+                if (motorIndex < 4) {
                     DEBUG_SET(DEBUG_DSHOT_RPM_TELEMETRY, motorIndex, value);
-                    DEBUG_SET(DEBUG_DSHOT_RPM_TELEMETRY, motorIndex+2, dshotTelemetryState.invalidPacketCount);
                 }
             } else {
                 dshotTelemetryState.invalidPacketCount++;
@@ -625,8 +624,8 @@ static motorVTable_t bbVTable = {
     .write = bbWrite,
     .writeInt = bbWriteInt,
     .updateComplete = bbUpdateComplete,
-    .convertExternalToMotor = dshotConvertFromExternal,
-    .convertMotorToExternal = dshotConvertToExternal,
+    .convertInternalToMotor = dshotConvertFromInternal,
+    .convertMotorToInternal = dshotConvertToInternal,
     .shutdown = bbShutdown,
 };
 

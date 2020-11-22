@@ -2055,7 +2055,7 @@ static void printServo(dumpFlags_t dumpMask, const servoParam_t *servoParams, co
                 defaultServoConf->max,
                 defaultServoConf->mid,
                 defaultServoConf->rate,
-                defaultServoConf->freq
+                defaultServoConf->speed
             );
         }
         cliDumpPrintLinef(dumpMask, equalsDefault, format,
@@ -2064,7 +2064,7 @@ static void printServo(dumpFlags_t dumpMask, const servoParam_t *servoParams, co
             servoConf->max,
             servoConf->mid,
             servoConf->rate,
-            servoConf->freq
+            servoConf->speed
         );
     }
 }
@@ -2087,19 +2087,19 @@ static void cliServo(const char *cmdName, char *cmdline)
     }
     else if (strcasecmp(args[FUNC], "status") == 0) {
         for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
-            if (servoOverride[i] == SERVO_OVERRIDE_OFF)
-                cliPrintLinef("servo %d %d", i+1, servo[i]);
+            if (getServoOverride(i) == SERVO_OVERRIDE_OFF)
+                cliPrintLinef("servo %d %d", i+1, lrintf(getServoOutput(i)));
             else
-                cliPrintLinef("servo %d %d [override]", i+1, servoOverride[i]);
+                cliPrintLinef("servo %d %d [override]", i+1, lrintf(getServoOverride(i)));
         }
     }
     else if (strcasecmp(args[FUNC], "override") == 0) {
         if (count == 1) {
             for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
-                if (servoOverride[i] == SERVO_OVERRIDE_OFF)
+                if (getServoOverride(i) == SERVO_OVERRIDE_OFF)
                     cliPrintLinef("servo override %d off", i+1);
                 else
-                    cliPrintLinef("servo override %d %d", i+1, servoOverride[i]);
+                    cliPrintLinef("servo override %d %d", i+1, lrintf(getServoOverride(i)));
             }
         }
         else if (count == 2) {
@@ -2116,7 +2116,7 @@ static void cliServo(const char *cmdName, char *cmdline)
                 }
             }
             for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
-                servoOverride[i] = value;
+                setServoOverride(i,value);
             }
         }
         else if (count == 3) {
@@ -2140,9 +2140,9 @@ static void cliServo(const char *cmdName, char *cmdline)
             }
             if (index == 0) {
                 for (int i=0; i<MAX_SUPPORTED_SERVOS; i++)
-                    servoOverride[i] = value;
+                    setServoOverride(i,value);
             } else {
-                servoOverride[index - 1] = value;
+                setServoOverride(index - 1, value);
             }
         }
         else {
@@ -2151,7 +2151,7 @@ static void cliServo(const char *cmdName, char *cmdline)
     }
     else if (count == 6) {
         const char *format = "servo %d %d %d %d %d %d";
-        enum { INDEX = 0, MIN, MAX, MID, RATE, FREQ, ARGS_COUNT };
+        enum { INDEX = 0, MIN, MAX, MID, RATE, SPEED, ARGS_COUNT };
         int vals[ARGS_COUNT];
         for (int i=0; i<ARGS_COUNT; i++)
             vals[i] = atoi(args[i]);
@@ -2160,7 +2160,7 @@ static void cliServo(const char *cmdName, char *cmdline)
             vals[MAX] < PWM_SERVO_PULSE_MIN || vals[MAX] > PWM_SERVO_PULSE_MAX ||
             vals[MIN] > vals[MAX] || vals[MID] < vals[MIN] || vals[MID] > vals[MAX] ||
             vals[RATE] < -2000 || vals[RATE] > 2000 ||
-            vals[FREQ] < -1 || vals[FREQ] > 500) {
+            vals[SPEED] < 0 || vals[SPEED] > 10000) {
             cliShowArgumentRangeError(cmdName, NULL, 0, 0);
             return;
         }
@@ -2170,14 +2170,14 @@ static void cliServo(const char *cmdName, char *cmdline)
         servo->max = vals[MAX];
         servo->mid = vals[MID];
         servo->rate = vals[RATE];
-        servo->freq = vals[FREQ];
+        servo->speed = vals[SPEED];
         cliDumpPrintLinef(0, false, format,
             index + 1,
             servo->min,
             servo->max,
             servo->mid,
             servo->rate,
-            servo->freq
+            servo->speed
         );
     }
     else {
@@ -2251,10 +2251,10 @@ static void cliMixer(const char *cmdName, char *cmdline)
     }
     else if (count == 1 && strcasecmp(args[FUNC], "override") == 0) {
         for (int i=1; i<MIXER_INPUT_COUNT; i++) {
-            if (mixerOverride[i] == MIXER_OVERRIDE_OFF)
+            if (mixerGetOverride(i) == MIXER_OVERRIDE_OFF)
                 cliPrintLinef("mixer override %s off", mixerInputNames[i]);
             else
-                cliPrintLinef("mixer override %s %d", mixerInputNames[i], mixerOverride[i]);
+                cliPrintLinef("mixer override %s %d", mixerInputNames[i], mixerGetOverride(i));
         }
     }
     else if (count == 3 && strcasecmp(args[FUNC], "override") == 0) {
@@ -2282,9 +2282,9 @@ static void cliMixer(const char *cmdName, char *cmdline)
         }
         if (index == MIXER_IN_NONE) {
             for (int i=0; i<MIXER_INPUT_COUNT; i++)
-                mixerOverride[i] = value;
+                mixerSetOverride(i, value);
         } else {
-            mixerOverride[index] = value;
+            mixerSetOverride(index, value);
         }
     }
     else if (count == 2 && strcasecmp(args[FUNC], "del") == 0) {
@@ -3542,8 +3542,8 @@ static void cliExit(const char *cmdName, char *cmdline)
     *cliBuffer = '\0';
     bufferIndex = 0;
     cliMode = false;
-    // incase a motor was left running during motortest, clear it here
-    motorResetDisarmed();
+
+    resetMotorOverride();
     cliReboot();
 }
 
@@ -3962,19 +3962,17 @@ static void cliMotor(const char *cmdName, char *cmdline)
     }
 
     if (index == 2) {
-        if (motorValue < PWM_RANGE_MIN || motorValue > PWM_RANGE_MAX) {
-            cliShowArgumentRangeError(cmdName, "VALUE", 1000, 2000);
+        if (motorValue < 0 || motorValue > 1000) {
+            cliShowArgumentRangeError(cmdName, "VALUE", 0, 1000);
         } else {
-            uint32_t motorOutputValue = motorConvertFromExternal(motorValue);
-
             if (motorIndex != ALL_MOTORS) {
-                motorSetDisarmed(motorIndex, motorOutputValue);
-                cliPrintLinef("motor %d: %d", motorIndex, motorOutputValue);
+                setMotorOverrideExt(motorIndex, motorValue);
+                cliPrintLinef("motor %d: %d", motorIndex, motorValue);
             } else  {
                 for (int i = 0; i < getMotorCount(); i++) {
-                    motorSetDisarmed(i, motorOutputValue);
+                    setMotorOverrideExt(i, motorValue);
                 }
-                cliPrintLinef("all motors: %d", motorOutputValue);
+                cliPrintLinef("all motors: %d", motorValue);
             }
         }
     } else {

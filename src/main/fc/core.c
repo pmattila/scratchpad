@@ -798,15 +798,6 @@ static FAST_CODE_NOINLINE void subTaskMixerUpdate(timeUs_t currentTimeUs)
     motorUpdate();
 #endif
 
-#ifdef USE_DSHOT_TELEMETRY_STATS
-    if (debugMode == DEBUG_DSHOT_RPM_ERRORS && useDshotTelemetry) {
-        const uint8_t motorCount = MIN(getMotorCount(), 4);
-        for (uint8_t i = 0; i < motorCount; i++) {
-            debug[i] = getDshotTelemetryMotorInvalidPercent(i);
-        }
-    }
-#endif
-
     DEBUG_SET(DEBUG_PIDLOOP, 2, micros() - startTime);
 }
 
