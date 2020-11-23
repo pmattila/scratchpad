@@ -1587,12 +1587,6 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
         serializeSDCardSummaryReply(dst);
         break;
 
-    case MSP_MOTOR_3D_CONFIG:
-        sbufWriteU16(dst, 0); // was flight3DConfig()->deadband3d_low);
-        sbufWriteU16(dst, 0); // was flight3DConfig()->deadband3d_high);
-        sbufWriteU16(dst, 0); // was flight3DConfig()->neutral3d);
-        break;
-
     case MSP_RC_DEADBAND:
         sbufWriteU8(dst, rcControlsConfig()->deadband);
         sbufWriteU8(dst, rcControlsConfig()->yaw_deadband);
@@ -2377,12 +2371,6 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
             loadCustomServoMixer();
         }
 #endif
-        break;
-
-    case MSP_SET_MOTOR_3D_CONFIG:
-        sbufReadU16(src); // was flight3DConfigMutable()->deadband3d_low
-        sbufReadU16(src); // was flight3DConfigMutable()->deadband3d_high
-        sbufReadU16(src); // was flight3DConfigMutable()->neutral3d
         break;
 
     case MSP_SET_RC_DEADBAND:
