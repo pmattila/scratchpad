@@ -1096,44 +1096,17 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
     case MSP_MOTOR_TELEMETRY:
         sbufWriteU8(dst, getMotorCount());
         for (unsigned i = 0; i < getMotorCount(); i++) {
-            int rpm = 0;
-            uint16_t invalidPct = 0;
+            uint32_t motorRpm = 0;
+            uint16_t errorRatio = 0;
             uint8_t escTemperature = 0;  // degrees celcius
             uint16_t escVoltage = 0;     // 0.01V per unit
             uint16_t escCurrent = 0;     // 0.01A per unit
             uint16_t escConsumption = 0; // mAh
 
-            bool rpmDataAvailable = false;
-
-#ifdef USE_DSHOT_TELEMETRY
-            if (motorConfig()->dev.useDshotTelemetry) {
-                rpm = calcMotorRPM(i, getDshotTelemetry(i));
-                rpmDataAvailable = true;
-                invalidPct = 10000; // 100.00%
-#ifdef USE_DSHOT_TELEMETRY_STATS
-                if (isDshotMotorTelemetryActive(i)) {
-                    invalidPct = getDshotTelemetryMotorInvalidPercent(i);
-                }
-#endif
-            }
-#endif
-
-#ifdef USE_FREQ_SENSOR
-            if (featureIsEnabled(FEATURE_FREQ_SENSOR)) {
-                if (!rpmDataAvailable) {
-                    rpm = calcMotorRPM(i, getFreqSensorRPM(i));
-                    rpmDataAvailable = true;
-                }
-            }
-#endif
-
 #ifdef USE_ESC_SENSOR
-            if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
+            if (featureIsEnabled(FEATURE_ESC_SENSOR) && isEscSensorActive()) {
                 escSensorData_t *escData = getEscSensorData(i);
-                if (!rpmDataAvailable) {
-                    rpm = calcMotorRPM(i,escData->rpm);
-                    rpmDataAvailable = true;
-                }
+                motorRpm = calcMotorRPM(i,escData->rpm);
                 escTemperature = escData->temperature;
                 escVoltage = escData->voltage;
                 escCurrent = escData->current;
@@ -1141,8 +1114,25 @@ static bool mspProcessOutCommand(int16_t cmdMSP, sbuf_t *dst)
             }
 #endif
 
-            sbufWriteU32(dst, rpm);
-            sbufWriteU16(dst, invalidPct);
+#ifdef USE_DSHOT_TELEMETRY
+            if (motorConfig()->dev.useDshotTelemetry) {
+                if (isDshotMotorTelemetryActive(i)) {
+                    motorRpm = calcMotorRPM(i, getDshotTelemetry(i));
+#ifdef USE_DSHOT_TELEMETRY_STATS
+                    errorRatio = getDshotTelemetryMotorInvalidPercent(i);
+#endif
+                }
+            }
+#endif
+
+#ifdef USE_FREQ_SENSOR
+            if (featureIsEnabled(FEATURE_FREQ_SENSOR) && isFreqSensorPortInitialized(i)) {
+                motorRpm = calcMotorRPM(i, getFreqSensorRPM(i));
+            }
+#endif
+
+            sbufWriteU32(dst, motorRpm);
+            sbufWriteU16(dst, errorRatio);
             sbufWriteU8(dst, escTemperature);
             sbufWriteU16(dst, escVoltage);
             sbufWriteU16(dst, escCurrent);
