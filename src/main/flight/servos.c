@@ -40,8 +40,6 @@
 #include "flight/servos.h"
 #include "flight/mixer.h"
 
-#include "io/gimbal.h"
-
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 
@@ -50,8 +48,6 @@ static FAST_RAM_ZERO_INIT float servoOutput[MAX_SUPPORTED_SERVOS];
 static FAST_RAM_ZERO_INIT float servoOverride[MAX_SUPPORTED_SERVOS];
 static FAST_RAM_ZERO_INIT float servoSpeedLimit[MAX_SUPPORTED_SERVOS];
 
-
-PG_REGISTER(gimbalConfig_t, gimbalConfig, PG_GIMBAL_CONFIG, 0);
 
 PG_REGISTER_WITH_RESET_FN(servoConfig_t, servoConfig, PG_SERVO_CONFIG, 0);
 
