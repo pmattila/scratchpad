@@ -245,19 +245,13 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"debug32",     7, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_DEBUG},
 #endif
 
-    /* Motors only rarely drops under minthrottle (when stick falls below mincommand), so predict minthrottle for it and use *unsigned* encoding (which is large for negative numbers but more compact for positive ones): */
-    {"motor",       0, UNSIGNED, .Ipredict = PREDICT(MINMOTOR), .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(AVERAGE_2), .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_1)},
-    /* Subsequent motors base their I-frame values on the first one, P-frame values on the average of last two frames: */
-    {"motor",       1, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_2)},
-    {"motor",       2, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_3)},
-    {"motor",       3, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_4)},
-    {"motor",       4, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_5)},
-    {"motor",       5, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_6)},
-    {"motor",       6, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_7)},
-    {"motor",       7, UNSIGNED, .Ipredict = PREDICT(MOTOR_0), .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_8)},
+    /* Helicopter motors */
+    {"motor",       0, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(PREVIOUS),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_1)},
+    {"motor",       1, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(PREVIOUS),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_2)},
+    {"motor",       2, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(PREVIOUS),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_3)},
+    {"motor",       3, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB), .Ppredict = PREDICT(PREVIOUS),     .Pencode = ENCODING(SIGNED_VB), CONDITION(AT_LEAST_MOTORS_4)},
 
     /* Helicopter servos */
-    // Ipredict set to Zero for now due to mix of 1500/760uS servos
     {"servo",       0, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"servo",       1, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
     {"servo",       2, UNSIGNED, .Ipredict = PREDICT(0),    .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(TAG8_4S16), CONDITION(ALWAYS)},
@@ -646,14 +640,7 @@ static void writeIntraframe(void)
     }
 #endif
 
-    //Motors can be below minimum output when disarmed, but that doesn't happen much
-    blackboxWriteUnsignedVB(blackboxCurrent->motor[0]);
-
-    //Motors tend to be similar to each other so use the first motor's value as a predictor of the others
-    const int motorCount = getMotorCount();
-    for (int x = 1; x < motorCount; x++) {
-        blackboxWriteSignedVB(blackboxCurrent->motor[x] - blackboxCurrent->motor[0]);
-    }
+    blackboxWriteSigned16VBArray(blackboxCurrent->motor, getMotorCount());
 
     // Write the servo I frames as unsigned since they will always be somewhere between 0 and 2020
     blackboxWriteUnsignedVB(blackboxCurrent->servo[0]);
@@ -785,7 +772,7 @@ static void writeInterframe(void)
 
     blackboxWriteTag8_8SVB(deltas, optionalFieldCount);
 
-    //Since gyros, accs and motors are noisy, base their predictions on the average of the history:
+    //Since gyros, accs are noisy, base their predictions on the average of the history:
     blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, gyroADC),   XYZ_AXIS_COUNT);
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ACC)) {
         blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, accADC), XYZ_AXIS_COUNT);
@@ -805,7 +792,11 @@ static void writeInterframe(void)
     }
 #endif
 
-    blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, motor),     getMotorCount());
+    // Calculate helicopter motor deltas
+    for (int x = 0; x < getMotorCount(); x++) {
+        deltas[x] = blackboxCurrent->motor[x] - blackboxLast->motor[x];
+    }
+    blackboxWriteSignedVBArray(deltas, getMotorCount());
 
     // Calculate helicopter servo deltas from last BB frame and write as a group of 4 to this P interframe
     for (int x = 0; x < 4; x++) {
@@ -1119,8 +1110,7 @@ static void loadMainState(timeUs_t currentTimeUs)
     }
 #endif
 
-    const int motorCount = getMotorCount();
-    for (int i = 0; i < motorCount; i++) {
+    for (int i = 0; i < getMotorCount(); i++) {
         blackboxCurrent->motor[i] = lrintf(getMotorOutput(i) * 1000);
     }
 
