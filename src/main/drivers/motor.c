@@ -149,35 +149,28 @@ bool checkMotorProtocolEnabled(const motorDevConfig_t *motorDevConfig)
     case PWM_TYPE_ONESHOT42:
     case PWM_TYPE_MULTISHOT:
     case PWM_TYPE_BRUSHED:
-        return true;
 #ifdef USE_DSHOT
     case PWM_TYPE_DSHOT150:
     case PWM_TYPE_DSHOT300:
     case PWM_TYPE_DSHOT600:
     case PWM_TYPE_PROSHOT1000:
-        return true;
 #endif
+        return true;
     }
     return false;
 }
 
 bool checkMotorProtocolDshot(const motorDevConfig_t *motorDevConfig)
 {
-    switch (motorDevConfig->motorPwmProtocol) {
-    case PWM_TYPE_STANDARD:
-    case PWM_TYPE_ONESHOT125:
-    case PWM_TYPE_ONESHOT42:
-    case PWM_TYPE_MULTISHOT:
-    case PWM_TYPE_BRUSHED:
-        return false;
 #ifdef USE_DSHOT
+    switch (motorDevConfig->motorPwmProtocol) {
     case PWM_TYPE_DSHOT150:
     case PWM_TYPE_DSHOT300:
     case PWM_TYPE_DSHOT600:
     case PWM_TYPE_PROSHOT1000:
         return true;
-#endif
     }
+#endif
     return false;
 }
 
@@ -230,12 +223,12 @@ void motorDevInit(const motorDevConfig_t *motorDevConfig, uint8_t motorCount)
 {
     bool useUnsyncedPwm = motorDevConfig->useUnsyncedPwm;
 
-    if (isMotorProtocolEnabled()) {
-        if (!isMotorProtocolDshot()) {
-            motorDevice = motorPwmDevInit(motorDevConfig, motorCount, useUnsyncedPwm);
-        }
+    motorProtocolEnabled = checkMotorProtocolEnabled(motorDevConfig);
+    motorProtocolDshot   = checkMotorProtocolDshot(motorDevConfig);
+
+    if (motorProtocolEnabled) {
 #ifdef USE_DSHOT
-        else {
+        if (motorProtocolDshot) {
 #ifdef USE_DSHOT_BITBANG
             if (isDshotBitbangActive(motorDevConfig)) {
                 motorDevice = dshotBitbangDevInit(motorDevConfig, motorCount);
@@ -244,8 +237,11 @@ void motorDevInit(const motorDevConfig_t *motorDevConfig, uint8_t motorCount)
             {
                 motorDevice = dshotPwmDevInit(motorDevConfig, motorCount, useUnsyncedPwm);
             }
-        }
+        } else
 #endif
+        {
+            motorDevice = motorPwmDevInit(motorDevConfig, motorCount, useUnsyncedPwm);
+        }
     }
 
     if (motorDevice) {
