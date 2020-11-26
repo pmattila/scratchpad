@@ -151,10 +151,8 @@ static motorVTable_t dshotPwmVTable = {
 
 FAST_RAM_ZERO_INIT motorDevice_t dshotPwmDevice;
 
-motorDevice_t *dshotPwmDevInit(const motorDevConfig_t *motorConfig, uint8_t motorCount, bool useUnsyncedPwm)
+motorDevice_t *dshotPwmDevInit(const motorDevConfig_t *motorConfig, uint8_t motorCount)
 {
-    UNUSED(useUnsyncedPwm);
-
     dshotPwmDevice.vTable = dshotPwmVTable;
 
 #ifdef USE_DSHOT_TELEMETRY

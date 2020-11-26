@@ -55,7 +55,7 @@ typedef struct {
 extern FAST_RAM_ZERO_INIT pwmOutputPort_t motors[MAX_SUPPORTED_MOTORS];
 
 struct motorDevConfig_s;
-motorDevice_t *motorPwmDevInit(const struct motorDevConfig_s *motorDevConfig, uint8_t motorCount, bool useUnsyncedPwm);
+motorDevice_t *motorPwmDevInit(const struct motorDevConfig_s *motorDevConfig, uint8_t motorCount);
 
 typedef struct servoDevConfig_s {
     uint16_t servoPwmRate;                  // The update rate of servo outputs (50-498Hz)

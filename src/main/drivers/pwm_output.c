@@ -197,8 +197,10 @@ static motorVTable_t motorPwmVTable = {
     .convertMotorToInternal = pwmConvertToInternal,
 };
 
-motorDevice_t *motorPwmDevInit(const motorDevConfig_t *motorConfig, uint8_t motorCount, bool useUnsyncedPwm)
+motorDevice_t *motorPwmDevInit(const motorDevConfig_t *motorConfig, uint8_t motorCount)
 {
+    bool useUnsyncedPwm = motorConfig->useUnsyncedPwm;
+
     motorPwmDevice.vTable = motorPwmVTable;
 
     float sMin = 0;

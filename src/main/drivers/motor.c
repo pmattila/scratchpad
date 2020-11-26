@@ -221,8 +221,6 @@ void motorWriteAll(float *values)
 
 void motorDevInit(const motorDevConfig_t *motorDevConfig, uint8_t motorCount)
 {
-    bool useUnsyncedPwm = motorDevConfig->useUnsyncedPwm;
-
     motorProtocolEnabled = checkMotorProtocolEnabled(motorDevConfig);
     motorProtocolDshot   = checkMotorProtocolDshot(motorDevConfig);
 
@@ -235,12 +233,12 @@ void motorDevInit(const motorDevConfig_t *motorDevConfig, uint8_t motorCount)
             } else
 #endif
             {
-                motorDevice = dshotPwmDevInit(motorDevConfig, motorCount, useUnsyncedPwm);
+                motorDevice = dshotPwmDevInit(motorDevConfig, motorCount);
             }
         } else
 #endif
         {
-            motorDevice = motorPwmDevInit(motorDevConfig, motorCount, useUnsyncedPwm);
+            motorDevice = motorPwmDevInit(motorDevConfig, motorCount);
         }
     }
 
