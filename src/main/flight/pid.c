@@ -955,11 +955,10 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
         if (isHeliSpooledUp()) {
             // Don't accumulate error if pidsumLimit is exceeded on the previous loop
             const float pidSumLimit = (axis == FD_YAW) ? pidProfile->pidSumLimitYaw : pidProfile->pidSumLimit;
-            if (fabsf(pidData[axis].Sum) > pidSumLimit) {
+            if (fabsf(pidData[axis].Sum) > pidSumLimit || mixerPidAxisSaturated(axis)) {
                 acErrorRate = 0;
             }
-            axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT,
-                -acErrorLimit, acErrorLimit);
+            axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT, -acErrorLimit, acErrorLimit);
             const float acCorrection = constrainf(axisError[axis] * acGain, -acLimit, acLimit);
             *currentPidSetpoint += acCorrection;
             *itermErrorRate += acCorrection;
@@ -1144,7 +1143,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         float Ki = pidCoefficient[axis].Ki;
         const float pidSumLimit = (axis == FD_YAW) ? pidProfile->pidSumLimitYaw : pidProfile->pidSumLimit;
         // Don't accumulate error if pidsumLimit is exceeded on the previous loop
-        if (fabsf(pidData[axis].Sum) > pidSumLimit) {
+        if (fabsf(pidData[axis].Sum) > pidSumLimit || mixerPidAxisSaturated(axis)) {
             Ki = 0;
         }
         pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);

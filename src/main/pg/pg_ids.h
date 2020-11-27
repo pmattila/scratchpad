@@ -158,6 +158,7 @@
 #define PG_GOVERNOR_CONFIG 1001
 #define PG_GENERIC_MIXER_CONFIG 1002
 #define PG_GENERIC_MIXER_RULES 1003
+#define PG_GENERIC_MIXER_INPUTS 1004
 
 
 // OSD configuration (subject to change)

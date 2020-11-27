@@ -292,36 +292,35 @@ static const char * const mixerOpNames[] = {
 // Mixer input names
 static const char * const mixerInputNames[] = {
     [MIXER_IN_NONE]                  = "-",
-    [MIXER_IN_GOVERNOR_MAIN]         = "G1",
-    [MIXER_IN_GOVERNOR_TAIL]         = "G2",
+    [MIXER_IN_GOVERNOR_MAIN]         = "GM",
+    [MIXER_IN_GOVERNOR_TAIL]         = "GT",
     [MIXER_IN_STABILIZED_ROLL]       = "SR",
     [MIXER_IN_STABILIZED_PITCH]      = "SP",
     [MIXER_IN_STABILIZED_YAW]        = "SY",
-    [MIXER_IN_STABILIZED_THROTTLE]   = "ST",
     [MIXER_IN_STABILIZED_COLLECTIVE] = "SC",
-    [MIXER_IN_RCCMD_ROLL]            = "CR",
-    [MIXER_IN_RCCMD_PITCH]           = "CP",
-    [MIXER_IN_RCCMD_YAW]             = "CY",
-    [MIXER_IN_RCCMD_THROTTLE]        = "CT",
-    [MIXER_IN_RCCMD_COLLECTIVE]      = "CC",
-    [MIXER_IN_RCDATA_0]              = "Ch1",
-    [MIXER_IN_RCDATA_1]              = "Ch2",
-    [MIXER_IN_RCDATA_2]              = "Ch3",
-    [MIXER_IN_RCDATA_3]              = "Ch4",
-    [MIXER_IN_RCDATA_4]              = "Ch5",
-    [MIXER_IN_RCDATA_5]              = "Ch6",
-    [MIXER_IN_RCDATA_6]              = "Ch7",
-    [MIXER_IN_RCDATA_7]              = "Ch8",
-    [MIXER_IN_RCDATA_8]              = "Ch9",
-    [MIXER_IN_RCDATA_9]              = "Ch10",
-    [MIXER_IN_RCDATA_10]             = "Ch11",
-    [MIXER_IN_RCDATA_11]             = "Ch12",
-    [MIXER_IN_RCDATA_12]             = "Ch13",
-    [MIXER_IN_RCDATA_13]             = "Ch14",
-    [MIXER_IN_RCDATA_14]             = "Ch15",
-    [MIXER_IN_RCDATA_15]             = "Ch16",
-    [MIXER_IN_RCDATA_16]             = "Ch17",
-    [MIXER_IN_RCDATA_17]             = "Ch18",
+    [MIXER_IN_RC_COMMAND_ROLL]       = "CR",
+    [MIXER_IN_RC_COMMAND_PITCH]      = "CP",
+    [MIXER_IN_RC_COMMAND_YAW]        = "CY",
+    [MIXER_IN_RC_COMMAND_COLLECTIVE] = "CC",
+    [MIXER_IN_RC_COMMAND_THROTTLE]   = "CT",
+    [MIXER_IN_RC_CHANNEL_1]          = "CH1",
+    [MIXER_IN_RC_CHANNEL_2]          = "CH2",
+    [MIXER_IN_RC_CHANNEL_3]          = "CH3",
+    [MIXER_IN_RC_CHANNEL_4]          = "CH4",
+    [MIXER_IN_RC_CHANNEL_5]          = "CH5",
+    [MIXER_IN_RC_CHANNEL_6]          = "CH6",
+    [MIXER_IN_RC_CHANNEL_7]          = "CH7",
+    [MIXER_IN_RC_CHANNEL_8]          = "CH8",
+    [MIXER_IN_RC_CHANNEL_9]          = "CH9",
+    [MIXER_IN_RC_CHANNEL_10]         = "CH10",
+    [MIXER_IN_RC_CHANNEL_11]         = "CH11",
+    [MIXER_IN_RC_CHANNEL_12]         = "CH12",
+    [MIXER_IN_RC_CHANNEL_13]         = "CH13",
+    [MIXER_IN_RC_CHANNEL_14]         = "CH14",
+    [MIXER_IN_RC_CHANNEL_15]         = "CH15",
+    [MIXER_IN_RC_CHANNEL_16]         = "CH16",
+    [MIXER_IN_RC_CHANNEL_17]         = "CH17",
+    [MIXER_IN_RC_CHANNEL_18]         = "CH18",
 };
 
 #if MAX_SUPPORTED_MOTORS != 4
@@ -331,10 +330,9 @@ static const char * const mixerInputNames[] = {
 #error MAX_SUPPORTED_SERVOS hardcoded to 8 in cli/cli.c
 #endif
 
-// Mixer output names
+// Mixer output names (1 + 8 + 4)
 static const char * const mixerOutputNames[] = {
-    "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8",
-    "M1", "M2", "M3", "M4"
+    "-", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "M1", "M2", "M3", "M4"
 };
 
 // sync this with rxFailsafeChannelMode_e
@@ -2089,9 +2087,9 @@ static void cliServo(const char *cmdName, char *cmdline)
     else if (strcasecmp(args[FUNC], "status") == 0) {
         for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
             if (getServoOverride(i) == SERVO_OVERRIDE_OFF)
-                cliPrintLinef("servo %d %d", i+1, lrintf(getServoOutput(i)));
+                cliPrintLinef("servo %d: %d", i+1, lrintf(getServoOutput(i)));
             else
-                cliPrintLinef("servo %d %d [override]", i+1, lrintf(getServoOverride(i)));
+                cliPrintLinef("servo %d: %d [override]", i+1, lrintf(getServoOverride(i)));
         }
     }
     else if (strcasecmp(args[FUNC], "override") == 0) {
@@ -2118,6 +2116,7 @@ static void cliServo(const char *cmdName, char *cmdline)
             }
             for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
                 setServoOverride(i,value);
+                cliPrintLinef("servo override %d %d", i+1, value);
             }
         }
         else if (count == 3) {
@@ -2140,10 +2139,14 @@ static void cliServo(const char *cmdName, char *cmdline)
                 return;
             }
             if (index == 0) {
-                for (int i=0; i<MAX_SUPPORTED_SERVOS; i++)
+                for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
                     setServoOverride(i,value);
+                    cliPrintLinef("servo override %d %d", i+1, value);
+                }
+
             } else {
                 setServoOverride(index - 1, value);
+                cliPrintLinef("servo override %d %d", index, value);
             }
         }
         else {
@@ -2177,9 +2180,9 @@ static void cliServo(const char *cmdName, char *cmdline)
         if (count == 1) {
             for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
                 if (servoParams(i)->rate >= 0)
-                    cliPrintLinef("# servo %d: normal", i+1);
+                    cliPrintLinef("servo %d: normal", i+1);
                 else
-                    cliPrintLinef("# servo %d: reversed", i+1);
+                    cliPrintLinef("servo %d: reversed", i+1);
             }
         }
         else if (count == 2) {
@@ -2192,7 +2195,10 @@ static void cliServo(const char *cmdName, char *cmdline)
             }
             servoParamsMutable(index-1)->rate *= -1;
             servoParamsMutable(index-1)->trim *= -1;
-            cliPrintLinef("# servo %d: rate %d trim %d", index, servoParams(index-1)->rate, servoParams(index-1)->trim);
+            if (servoParams(index-1)->rate >= 0)
+                cliPrintLinef("servo %d: normal", index);
+            else
+                cliPrintLinef("servo %d: reversed", index);
         }
         else {
             cliShowInvalidArgumentCountError(cmdName);
@@ -2222,7 +2228,7 @@ static void cliServo(const char *cmdName, char *cmdline)
         servo->trim = vals[TRIM];
         servo->rate = vals[RATE];
         servo->speed = vals[SPEED];
-        cliDumpPrintLinef(0, false, format,
+        cliPrintLinef(format,
             index + 1,
             servo->min,
             servo->max,
@@ -2238,45 +2244,127 @@ static void cliServo(const char *cmdName, char *cmdline)
 }
 #endif
 
-static void printMixerRules(dumpFlags_t dumpMask, const mixer_t *customMixers, const mixer_t *defaultMixers, const char *headingStr)
-{
-    const char *format = "mixer rule %u %s %s %s %d %d %d %d";
-    bool equalsDefault = false;
+static const char flightModeMapLetters[32] = {
+    [RESCUE_MODE_BIT         ]  = 'R',
+    [HORIZON_MODE_BIT        ]  = 'H',
+    [PASSTHRU_MODE_BIT       ]  = 'P',
+    [FAILSAFE_MODE_BIT       ]  = 'F',
+    [GPS_RESCUE_MODE_BIT     ]  = 'G',
 
-    if (defaultMixers) {
-        equalsDefault = !memcmp(customMixers, defaultMixers, sizeof(mixer_t)*MIXER_RULE_COUNT);
+    [RESCUE_MODE_BIT     + 16]  = 'r',
+    [HORIZON_MODE_BIT    + 16]  = 'h',
+    [PASSTHRU_MODE_BIT   + 16]  = 'p',
+    [FAILSAFE_MODE_BIT   + 16]  = 'f',
+    [GPS_RESCUE_MODE_BIT + 16]  = 'g',
+};
+
+static uint32_t parseModeMap(const char *str)
+{
+    uint32_t map;
+
+    for (map=0; str && *str; str++) {
+        for (unsigned i=0; i<32; i++) {
+            if (flightModeMapLetters[i] == *str) {
+                map |= BIT(i);
+                break;
+            }
+        }
+    }
+
+    return map;
+}
+
+static const char * printModeMap(uint32_t map, char *buf)
+{
+    char *ptr = buf;
+
+    for (unsigned i=0; i<32; i++) {
+        if ((map & BIT(i)) && flightModeMapLetters[i])
+            *ptr++ = flightModeMapLetters[i];
+    }
+    *ptr = 0;
+
+    return buf;
+}
+
+static void printMixerRules(dumpFlags_t dumpMask, const mixerRule_t *rules, const mixerRule_t *defaults, const char *headingStr)
+{
+    const char *format = "mixer rule %u %s %s %s %d %d %d %d %s";
+    bool equalsDefault = false;
+    char buf[34];
+
+    if (defaults) {
+        equalsDefault = !memcmp(rules, defaults, sizeof(mixerRule_t)*MIXER_RULE_COUNT);
         if ((dumpMask & DO_DIFF) && !(dumpMask & SHOW_DEFAULTS) && equalsDefault)
             return;
     }
     if (headingStr) {
         cliPrintHashLine(headingStr);
     }
-    for (uint32_t i = 0; i < MIXER_RULE_COUNT; i++) {
-        const mixer_t *mixer = &customMixers[i];
-        if (defaultMixers) {
-            const mixer_t *defaultMixer = &defaultMixers[i];
-            equalsDefault = !memcmp(mixer, defaultMixer, sizeof(mixer_t));
-            if (defaultMixer->oper) {
-                cliDefaultPrintLinef(dumpMask, equalsDefault, format, i,
-                                     mixerOpNames[defaultMixer->oper],
-                                     mixerInputNames[defaultMixer->input],
-                                     mixerOutputNames[defaultMixer->output],
-                                     defaultMixer->offset,
-                                     defaultMixer->rate,
-                                     defaultMixer->min,
-                                     defaultMixer->max
-                );
-            }
+    for (unsigned i = 0; i < MIXER_RULE_COUNT; i++) {
+        const mixerRule_t *rule = &rules[i];
+        if (defaults) {
+            const mixerRule_t *def = &defaults[i];
+            equalsDefault = !memcmp(rule, def, sizeof(mixerRule_t));
+            cliDefaultPrintLinef(dumpMask, equalsDefault, format, i,
+                                 mixerOpNames[def->oper],
+                                 mixerInputNames[def->input],
+                                 mixerOutputNames[def->output],
+                                 def->rate,
+                                 def->offset,
+                                 def->min,
+                                 def->max,
+                                 printModeMap(def->mode, buf)
+            );
         }
-        if (mixer->oper) {
-            cliDumpPrintLinef(dumpMask, false, format, i,
-                              mixerOpNames[mixer->oper],
-                              mixerInputNames[mixer->input],
-                              mixerOutputNames[mixer->output],
-                              mixer->offset,
-                              mixer->rate,
-                              mixer->min,
-                              mixer->max
+        if (rule->oper) {
+            cliDumpPrintLinef(dumpMask, equalsDefault, format, i,
+                              mixerOpNames[rule->oper],
+                              mixerInputNames[rule->input],
+                              mixerOutputNames[rule->output],
+                              rule->rate,
+                              rule->offset,
+                              rule->min,
+                              rule->max,
+                              printModeMap(rule->mode, buf)
+            );
+        }
+    }
+}
+
+static void printMixerInputs(dumpFlags_t dumpMask, const mixerInput_t *inputs, const mixerInput_t *defaults, const char *headingStr)
+{
+    const char *format = "mixer input %s %d %d %d %d";
+    bool equalsDefault = false;
+
+    if (defaults) {
+        equalsDefault = !memcmp(inputs, defaults, sizeof(mixerInput_t)*MIXER_INPUT_COUNT);
+        if ((dumpMask & DO_DIFF) && !(dumpMask & SHOW_DEFAULTS) && equalsDefault)
+            return;
+    }
+    if (headingStr) {
+        cliPrintHashLine(headingStr);
+    }
+    for (unsigned i = 1; i < MIXER_IN_COUNT; i++) {
+        const mixerInput_t *input = &inputs[i];
+        if (defaults) {
+            const mixerInput_t *def = &defaults[i];
+            equalsDefault = !memcmp(input, def, sizeof(mixerInput_t));
+            cliDefaultPrintLinef(dumpMask, equalsDefault, format,
+                                 mixerInputNames[i],
+                                 def->rate,
+                                 def->offset,
+                                 def->min,
+                                 def->max
+            );
+        }
+        if (input->rate) {
+            cliDumpPrintLinef(dumpMask, equalsDefault, format,
+                              mixerInputNames[i],
+                              input->rate,
+                              input->offset,
+                              input->min,
+                              input->max
             );
         }
     }
@@ -2284,7 +2372,7 @@ static void printMixerRules(dumpFlags_t dumpMask, const mixer_t *customMixers, c
 
 static void cliMixer(const char *cmdName, char *cmdline)
 {
-    enum {FUNC=0, ARGS_MAX=10};
+    enum { FUNC=0, ARG1, ARGS_MAX=12 };
     char *args[ARGS_MAX];
     char *saveptr, *ptr;
     int count = 0;
@@ -2296,102 +2384,178 @@ static void cliMixer(const char *cmdName, char *cmdline)
     }
 
     if (count == 0) {
-        printMixerRules(DUMP_MASTER, mixerRules(0), NULL, NULL);
+        printMixerInputs(DUMP_MASTER, mixerInputs(0), NULL, "mixer input");
+        printMixerRules(DUMP_MASTER, mixerRules(0), NULL, "mixer rule");
     }
-    else if (count == 1 && strcasecmp(args[FUNC], "reset") == 0) {
-        memset(mixerRules_array(), 0, sizeof(*mixerRules_array()));
+    // count > 0
+    else if (strcasecmp(args[FUNC], "reset") == 0) {
+        PG_RESET(mixerInputs);
+        PG_RESET(mixerRules);
     }
-    else if (count == 1 && strcasecmp(args[FUNC], "override") == 0) {
-        for (int i=1; i<MIXER_INPUT_COUNT; i++) {
-            if (mixerGetOverride(i) == MIXER_OVERRIDE_OFF)
-                cliPrintLinef("mixer override %s off", mixerInputNames[i]);
-            else
-                cliPrintLinef("mixer override %s %d", mixerInputNames[i], mixerGetOverride(i));
+    else if (strcasecmp(args[FUNC], "input") == 0) {
+        if (count == 1) {
+            printMixerInputs(DUMP_MASTER, mixerInputs(0), NULL, NULL);
+        }
+        else if (count == 2) {
+            if (strcasecmp(args[ARG1], "reset") == 0) {
+                PG_RESET(mixerInputs);
+            }
+        }
+        else if (count == 6) {
+            enum { FUNC=0, INPUT, RATE, OFFSET, MIN, MAX, ARGS_COUNT };
+            int vals[ARGS_COUNT];
+            for (int i=1; i<count; i++)
+                vals[i] = atoi(args[i]);
+            for (unsigned i=0; i<ARRAYLEN(mixerInputNames); i++) {
+                if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0)
+                    vals[INPUT] = i;
+            }
+            if (vals[INPUT] > 0 && vals[INPUT] < MIXER_INPUT_COUNT &&
+                vals[RATE] >= MIXER_RATE_MIN && vals[RATE] <= MIXER_RATE_MAX &&
+                vals[OFFSET] >= MIXER_INPUT_MIN && vals[OFFSET] <= MIXER_INPUT_MAX &&
+                vals[MIN] >= MIXER_INPUT_MIN && vals[MIN] <= MIXER_INPUT_MAX &&
+                vals[MAX] >= MIXER_INPUT_MIN && vals[MAX] <= MIXER_INPUT_MAX &&
+                vals[MIN] <= vals[MAX])
+            {
+                int index = vals[INPUT];
+                mixerInput_t *input = mixerInputsMutable(index);
+                input->offset = vals[OFFSET];
+                input->rate = vals[RATE];
+                input->min = vals[MIN];
+                input->max = vals[MAX];
+            } else {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            }
+        } else {
+            cliShowInvalidArgumentCountError(cmdName);
         }
     }
-    else if (count == 3 && strcasecmp(args[FUNC], "override") == 0) {
-        enum {FUNC=0, INPUT, VALUE};
-        int index, value;
-        if (strcasecmp(args[INPUT], "all") == 0) {
-            index = MIXER_IN_NONE;
-        } else {
-            index = atoi(args[INPUT]);
-            for (unsigned i=1; i<ARRAYLEN(mixerInputNames); i++) {
-                if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0) {
-                    index = i;
+    else if (strcasecmp(args[FUNC], "rule") == 0) {
+        if (count == 1) {
+            printMixerRules(DUMP_MASTER, mixerRules(0), NULL, NULL);
+        }
+        else if (count == 2) {
+            if (strcasecmp(args[ARG1], "reset") == 0) {
+                PG_RESET(mixerRules);
+            }
+        }
+        else if (count == 3) {
+            enum { FUNC=0, RULE, OPER, ARGS_COUNT };
+            if (strcasecmp(args[OPER], "del") == 0) {
+                int index = atoi(args[RULE]);
+                if (index >= 0 && index < MIXER_RULE_COUNT) {
+                    memset(mixerRulesMutable(index), 0, sizeof(mixerRule_t));
+                } else {
+                    cliShowArgumentRangeError(cmdName, NULL, 0, 0);
                 }
             }
         }
-        if (strcasecmp(args[VALUE], "off") == 0) {
-            value = MIXER_OVERRIDE_OFF;
+        else if (count == 9 || count == 10) {
+            enum { FUNC=0, RULE, OPER, INPUT, OUTPUT, RATE, OFFSET, MIN, MAX, MODE, ARGS_COUNT };
+            int vals[ARGS_COUNT];
+            for (int i=1; i<count; i++)
+                vals[i] = atoi(args[i]);
+            if (count == 10)
+                vals[MODE] = parseModeMap(args[MODE]);
+            else
+                vals[MODE] = 0;
+            for (unsigned i=0; i<ARRAYLEN(mixerOpNames); i++) {
+                if (strcasecmp(args[OPER], mixerOpNames[i]) == 0)
+                    vals[OPER] = i;
+            }
+            for (unsigned i=0; i<ARRAYLEN(mixerInputNames); i++) {
+                if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0)
+                    vals[INPUT] = i;
+            }
+            for (unsigned i=0; i<ARRAYLEN(mixerOutputNames); i++) {
+                if (strcasecmp(args[OUTPUT], mixerOutputNames[i]) == 0)
+                    vals[OUTPUT] = i;
+            }
+            if (vals[RULE] >= 0 && vals[RULE] < MIXER_RULE_COUNT &&
+                vals[OPER] >= MIXER_OP_NUL && vals[OPER] < MIXER_OP_COUNT &&
+                vals[INPUT] >= 0 && vals[INPUT] < MIXER_INPUT_COUNT &&
+                vals[OUTPUT] >= 0 && vals[OUTPUT] < MIXER_OUTPUT_COUNT &&
+                vals[OFFSET] >= MIXER_INPUT_MIN && vals[OFFSET] <= MIXER_INPUT_MAX &&
+                vals[RATE] >= MIXER_RATE_MIN && vals[RATE] <= MIXER_RATE_MAX &&
+                vals[MIN] >= MIXER_INPUT_MIN && vals[MIN] <= MIXER_INPUT_MAX &&
+                vals[MAX] >= MIXER_INPUT_MIN && vals[MAX] <= MIXER_INPUT_MAX &&
+                vals[MIN] <= vals[MAX])
+            {
+                int index = vals[RULE];
+                mixerRule_t *mix = mixerRulesMutable(index);
+                mix->oper   = vals[OPER];
+                mix->input  = vals[INPUT];
+                mix->output = vals[OUTPUT];
+                mix->rate   = vals[RATE];
+                mix->offset = vals[OFFSET];
+                mix->min    = vals[MIN];
+                mix->max    = vals[MAX];
+                mix->mode   = vals[MODE];
+            } else {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            }
         } else {
-            value = atoi(args[VALUE]);
+            cliShowInvalidArgumentCountError(cmdName);
         }
-        if (index < MIXER_IN_NONE || index >= MIXER_IN_COUNT ||
-            value < MIXER_OVERRIDE_MIN || value > MIXER_OVERRIDE_OFF) {
-            cliShowArgumentRangeError(cmdName, NULL, 0, 0);
-            return;
+    }
+    else if (strcasecmp(args[FUNC], "override") == 0) {
+        if (count == 1) {
+            for (int i=1; i<MIXER_INPUT_COUNT; i++) {
+                if (mixerGetOverride(i) == MIXER_OVERRIDE_OFF)
+                    cliPrintLinef("mixer override %s off", mixerInputNames[i]);
+                else
+                    cliPrintLinef("mixer override %s %d", mixerInputNames[i], mixerGetOverride(i));
+            }
         }
-        if (index == MIXER_IN_NONE) {
-            for (int i=0; i<MIXER_INPUT_COUNT; i++)
+        else if (count == 2) {
+            enum { FUNC=0, VALUE };
+            int value;
+            if (strcasecmp(args[VALUE], "off") == 0)
+                value = MIXER_OVERRIDE_OFF;
+            else
+                value = atoi(args[VALUE]);
+            if (value < MIXER_OVERRIDE_MIN || value > MIXER_OVERRIDE_OFF) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            for (int i = 0; i < MIXER_INPUT_COUNT; i++) {
                 mixerSetOverride(i, value);
-        } else {
-            mixerSetOverride(index, value);
-        }
-    }
-    else if (count == 2 && strcasecmp(args[FUNC], "del") == 0) {
-        enum {FUNC=0, RULE};
-        int index = atoi(args[RULE]);
-        if (index >= 0 && index < MIXER_RULE_COUNT) {
-            memset(mixerRulesMutable(index), 0, sizeof(mixer_t)*(MIXER_RULE_COUNT-index));
-        } else {
-            cliShowArgumentRangeError(cmdName, NULL, 0, 0);
-        }
-    }
-    else if (count == 9 && strcasecmp(args[FUNC], "rule") == 0) {
-        enum {FUNC=0, RULE, OPER, INPUT, OUTPUT, OFFSET, RATE, MIN, MAX, ARGS_COUNT};
-        int vals[ARGS_COUNT];
-        for (int i=RULE; i<ARGS_COUNT; i++)
-            vals[i] = atoi(args[i]);
-        for (unsigned i=0; i<ARRAYLEN(mixerOpNames); i++) {
-            if (strcasecmp(args[OPER], mixerOpNames[i]) == 0) {
-                vals[OPER] = i;
             }
         }
-        for (unsigned i=0; i<ARRAYLEN(mixerInputNames); i++) {
-            if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0) {
-                vals[INPUT] = i;
+        else if (count == 3) {
+            enum { FUNC=0, INPUT, VALUE };
+            int index, value;
+            if (strcasecmp(args[INPUT], "all") == 0) {
+                index = MIXER_IN_NONE;
+            } else {
+                index = atoi(args[INPUT]);
+                for (unsigned i = 1; i < ARRAYLEN(mixerInputNames); i++) {
+                    if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0) {
+                        index = i;
+                    }
+                }
             }
-        }
-        for (unsigned i=0; i<ARRAYLEN(mixerOutputNames); i++) {
-            if (strcasecmp(args[OUTPUT], mixerOutputNames[i]) == 0) {
-                vals[OUTPUT] = i;
+            if (strcasecmp(args[VALUE], "off") == 0)
+                value = MIXER_OVERRIDE_OFF;
+            else
+                value = atoi(args[VALUE]);
+            if (index < MIXER_IN_NONE || index >= MIXER_IN_COUNT ||
+                value < MIXER_OVERRIDE_MIN || value > MIXER_OVERRIDE_OFF) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
             }
-        }
-        if (vals[RULE] >= 0 && vals[RULE] < MIXER_RULE_COUNT &&
-            vals[OPER] >= MIXER_OP_NUL && vals[OPER] < MIXER_OP_COUNT &&
-            vals[INPUT] >= 0 && vals[INPUT] < MIXER_INPUT_COUNT &&
-            vals[OUTPUT] >= 0 && vals[OUTPUT] < MIXER_OUTPUT_COUNT &&
-            vals[OFFSET] >= -2000 && vals[OFFSET] <= 2000 &&
-            vals[RATE] >= -2000 && vals[RATE] <= 2000 &&
-            vals[MIN] >= -2000 && vals[MIN] <= 2000 &&
-            vals[MAX] >= -2000 && vals[MAX] <= 2000 &&
-            vals[MIN] <= vals[MAX])
-        {
-            mixer_t *mix = mixerRulesMutable(vals[RULE]);
-            mix->oper   = vals[OPER];
-            mix->input  = vals[INPUT];
-            mix->output = vals[OUTPUT];
-            mix->offset = vals[OFFSET];
-            mix->rate   = vals[RATE];
-            mix->min    = vals[MIN];
-            mix->max    = vals[MAX];
+            if (index == MIXER_IN_NONE) {
+                for (int i = 0; i < MIXER_INPUT_COUNT; i++)
+                    mixerSetOverride(i, value);
+            } else {
+                mixerSetOverride(index, value);
+            }
         } else {
-            cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            cliShowInvalidArgumentCountError(cmdName);
         }
     }
     else {
-        cliShowInvalidArgumentCountError(cmdName);
+        cliShowParseError(cmdName);
     }
 }
 
@@ -6161,7 +6325,9 @@ static void printConfig(const char *cmdName, char *cmdline, bool doDiff)
 #ifdef USE_SERVOS
             printServo(dumpMask, servoParams_CopyArray, servoParams(0), "servo");
 #endif
-            printMixerRules(dumpMask, mixerRules_CopyArray, mixerRules(0), "mixer\r\nmixer reset");
+
+            printMixerInputs(dumpMask, mixerInputs_CopyArray, mixerInputs(0), "mixer input");
+            printMixerRules(dumpMask, mixerRules_CopyArray, mixerRules(0), "mixer rule");
 
 #if defined(USE_BEEPER)
             printBeeper(dumpMask, beeperConfig_Copy.beeper_off_flags, beeperConfig()->beeper_off_flags, "beeper", BEEPER_ALLOWED_MODES, "beeper");
@@ -6419,9 +6585,13 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("map", "configure rc channel order", "[<map>]", cliMap),
     CLI_COMMAND_DEF("mcu_id", "id of the microcontroller", NULL, cliMcuId),
     CLI_COMMAND_DEF("mixer", "configure mixer",
-                    "rule <i> <set|add|mul> <input> <output> <offset> <rate> <min> <max>\r\n"
-                    "\tdel <i>\r\n"
-                    "\toverride <input|all> <value|off>",
+                    "input <input> <rate> <min> <max>\r\n"
+                    "\tinput reset\r\n"
+                    "\trule <index> [set|add|mul] <input> <output> <offset> <rate> <min> <max>\r\n"
+                    "\trule <index> [del]\r\n"
+                    "\trule reset\r\n"
+                    "\toverride <input> <value|off>\r\n"
+                    "\toverride <value|off>",
                     cliMixer),
 #ifdef USE_LED_STRIP_STATUS_MODE
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),

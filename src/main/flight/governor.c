@@ -33,6 +33,8 @@
 
 #include "drivers/time.h"
 
+#include "rx/rx.h"
+
 #include "fc/runtime_config.h"
 #include "fc/rc_controls.h"
 
@@ -153,6 +155,10 @@ static inline float idleMap(float throttle)
     return constrainf(throttle - 0.05f, 0, 0.15f);
 }
 
+static inline float getThrottle(void)
+{
+    return (float)(rcCommand[THROTTLE] - PWM_RANGE_MIN) / (PWM_RANGE_MAX - PWM_RANGE_MIN);
+}
 
 static void govUpdateFeedForward(void)
 {
@@ -177,8 +183,8 @@ static void govUpdateFeedForward(void)
 static void governorUpdatePassthrough(void)
 {
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
-    const float throttle = mixerGetThrottle();
     const bool throttleLow = (throttleStatus == THROTTLE_LOW);
+    const float throttle = getThrottle();
 
     float govMainPrevious = govOutput[GOV_MAIN];
     float govMain = 0;
