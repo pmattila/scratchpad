@@ -116,6 +116,19 @@ static inline float limitSlewRate(float old, float new, float rate)
     return new;
 }
 
+static inline float servoConstrainf(uint8_t index, float value, float min, float max)
+{
+    if (value > max) {
+        mixerSaturateServoOutput(index);
+        return max;
+    }
+    else if (value < min) {
+        mixerSaturateServoOutput(index);
+        return min;
+    }
+    return value;
+}
+
 void servoUpdate(void)
 {
     float pwm;
@@ -132,7 +145,7 @@ void servoUpdate(void)
         if (servoSpeedLimit[i] > 0)
             pwm = limitSlewRate(servoOutput[i], pwm, servoSpeedLimit[i]);
 
-        servoOutput[i] = constrainf(pwm, servoParams(i)->min, servoParams(i)->max);
+        servoOutput[i] = servoConstrainf(i, pwm, servoParams(i)->min, servoParams(i)->max);
 
         pwmWriteServo(i, servoOutput[i]);
     }

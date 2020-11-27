@@ -48,57 +48,97 @@
 #include "sensors/gyro.h"
 
 
-PG_REGISTER_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules, PG_HELI_MIXER, 0);
+PG_REGISTER_ARRAY(mixerRule_t, MIXER_RULE_COUNT, mixerRules, PG_MIXER_RULES, 0);
+
+PG_REGISTER_ARRAY(mixerInput_t, MIXER_INPUT_COUNT, mixerInputs, PG_MIXER_INPUTS, 0);
 
 
-static FAST_RAM_ZERO_INIT uint8_t mixerActiveServos;
-static FAST_RAM_ZERO_INIT uint8_t mixerActiveMotors;
+typedef struct {
+    float     offset;
+    float     rate;
+    float     min;
+    float     max;
+} mixInput_t;
 
-static FAST_RAM_ZERO_INIT uint8_t mixerRuleCount;
+typedef struct {
+    uint32_t  mode;
+    uint8_t   oper;
+    uint8_t   input;
+    uint8_t   output;
+    float     offset;
+    float     rate;
+    float     min;
+    float     max;
+} mixRule_t;
 
-static FAST_RAM_ZERO_INIT mixer_t mixer[MIXER_RULE_COUNT];
 
-static FAST_RAM_ZERO_INIT float mixerInput[MIXER_INPUT_COUNT];
-static FAST_RAM_ZERO_INIT float mixerOutput[MIXER_OUTPUT_COUNT];
+static FAST_RAM_ZERO_INIT mixRule_t   rules[MIXER_RULE_COUNT];
+static FAST_RAM_ZERO_INIT mixInput_t  inputs[MIXER_INPUT_COUNT];
 
-static FAST_RAM_ZERO_INIT int16_t mixerOverride[MIXER_INPUT_COUNT];
+static FAST_RAM_ZERO_INIT float       mixInput[MIXER_INPUT_COUNT];
+static FAST_RAM_ZERO_INIT float       mixOutput[MIXER_OUTPUT_COUNT];
+static FAST_RAM_ZERO_INIT int16_t     mixOverride[MIXER_INPUT_COUNT];
+static FAST_RAM_ZERO_INIT bool        mixSaturated[MIXER_INPUT_COUNT];
 
-static FAST_RAM_ZERO_INIT float cyclicTotal;
-static FAST_RAM_ZERO_INIT float cyclicLimit;
+static FAST_RAM_ZERO_INIT uint8_t     activeServos;
+static FAST_RAM_ZERO_INIT uint8_t     activeMotors;
+
+static FAST_RAM_ZERO_INIT float       cyclicTotal;
+static FAST_RAM_ZERO_INIT float       cyclicLimit;
+
+static FAST_RAM_ZERO_INIT uint32_t    flightModeMask;
+
+
+static inline float mixerConstrainf(uint8_t index, float val, float min, float max)
+{
+    if (val > max) {
+        mixSaturated[index] = true;
+        return max;
+    }
+    else if (val < min) {
+        mixSaturated[index] = true;
+        return min;
+    }
+    return val;
+}
 
 
 void mixerInit(void)
 {
-    mixerActiveServos = 0;
-    mixerActiveMotors = 0;
-    mixerRuleCount = 0;
+    activeServos = 0;
+    activeMotors = 0;
 
     cyclicLimit = 1.0;
 
     for (int i = 0; i < MIXER_RULE_COUNT; i++) {
-        const mixer_t *rule = mixerRules(i);
+        const mixerRule_t *rule = mixerRules(i);
 
-        if (rule->oper == MIXER_OP_NUL)
-            break;
+        if (rule->oper) {
+            rules[i].mode    = rule->mode;
+            rules[i].oper    = constrain(rule->oper, 1, MIXER_OP_COUNT - 1);
+            rules[i].input   = constrain(rule->input, 0, MIXER_INPUT_COUNT -1);
+            rules[i].output  = constrain(rule->output, 0, MIXER_OUTPUT_COUNT - 1);
+            rules[i].offset  = constrain(rule->offset, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
+            rules[i].rate    = constrain(rule->rate, MIXER_RATE_MIN, MIXER_RATE_MAX) * 1e-3;
+            rules[i].min     = constrain(rule->min, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
+            rules[i].max     = constrain(rule->max, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
 
-        mixer[i].oper    = constrain(rule->oper, 1, MIXER_OP_COUNT - 1);
-        mixer[i].input   = constrain(rule->input, 0, MIXER_INPUT_COUNT -1);
-        mixer[i].output  = constrain(rule->output, 0, MIXER_OUTPUT_COUNT - 1);
-        mixer[i].offset  = constrain(rule->offset, -2000, 2000);
-        mixer[i].rate    = constrain(rule->rate, -2000, 2000);
-        mixer[i].min     = constrain(rule->min, -2000, 2000);
-        mixer[i].max     = constrain(rule->max, mixer[i].min, 2000);
-
-        if (mixer[i].output < MIXER_OUTPUT_MOTORS)
-            mixerActiveServos = MAX(mixerActiveServos, mixer[i].output + 1);
-        else
-            mixerActiveMotors = MAX(mixerActiveMotors, mixer[i].output - MIXER_OUTPUT_MOTORS + 1);
-
-        mixerRuleCount++;
+            if (rules[i].output < MAX_SUPPORTED_SERVOS)
+                activeServos = MAX(activeServos, rules[i].output + 1);
+            else
+                activeMotors = MAX(activeMotors, rules[i].output - MIXER_MOTOR_OFFSET + 1);
+        }
     }
 
     for (int i = 1; i < MIXER_INPUT_COUNT; i++) {
-        mixerOverride[i] = MIXER_OVERRIDE_OFF;
+        const mixerInput_t *input = mixerInputs(i);
+
+        inputs[i].min    = constrain(input->min, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
+        inputs[i].max    = constrain(input->max, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
+        inputs[i].rate   = constrain(input->rate, MIXER_RATE_MIN,  MIXER_RATE_MAX) * 1e-3;
+        inputs[i].offset = constrain(input->offset, MIXER_INPUT_MIN, MIXER_INPUT_MAX) * 1e-3;
+
+        mixOverride[i] = MIXER_OVERRIDE_OFF;
     }
 
     mixerInitProfile();
@@ -109,119 +149,153 @@ void mixerInitProfile(void)
     cyclicLimit = currentPidProfile->pidSumLimit * MIXER_PID_SCALING;
 }
 
-void mixerUpdate(void)
+static void mixerUpdateInputs(void)
 {
-    mixerInput[MIXER_IN_RCCMD_ROLL]       = rcCommand[ROLL]       * MIXER_RC_SCALING;
-    mixerInput[MIXER_IN_RCCMD_PITCH]      = rcCommand[PITCH]      * MIXER_RC_SCALING;
-    mixerInput[MIXER_IN_RCCMD_YAW]        = rcCommand[YAW]        * MIXER_RC_SCALING;
-    mixerInput[MIXER_IN_RCCMD_COLLECTIVE] = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_ROLL]        = rcCommand[ROLL]       * MIXER_RC_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_PITCH]       = rcCommand[PITCH]      * MIXER_RC_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_YAW]         = rcCommand[YAW]        * MIXER_RC_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_COLLECTIVE]  = rcCommand[COLLECTIVE] * MIXER_RC_SCALING;
 
-    mixerInput[MIXER_IN_RCCMD_THROTTLE]   = (rcCommand[THROTTLE] - MIXER_THR_OFFSET) * MIXER_THR_SCALING;
+    mixInput[MIXER_IN_RC_COMMAND_THROTTLE]    = (rcCommand[THROTTLE] - MIXER_THR_OFFSET) * MIXER_THR_SCALING;
 
-    if (FLIGHT_MODE(PASSTHRU_MODE)) {
-        mixerInput[MIXER_IN_STABILIZED_ROLL]  = mixerInput[MIXER_IN_RCCMD_ROLL];
-        mixerInput[MIXER_IN_STABILIZED_PITCH] = mixerInput[MIXER_IN_RCCMD_PITCH];
-        mixerInput[MIXER_IN_STABILIZED_YAW]   = mixerInput[MIXER_IN_RCCMD_YAW];
-    } else {
-        mixerInput[MIXER_IN_STABILIZED_ROLL]  = pidData[FD_ROLL].SumLim  * MIXER_PID_SCALING;
-        mixerInput[MIXER_IN_STABILIZED_PITCH] = pidData[FD_PITCH].SumLim * MIXER_PID_SCALING;
-        mixerInput[MIXER_IN_STABILIZED_YAW]   = pidData[FD_YAW].SumLim   * MIXER_PID_SCALING;
-    }
+    for (int i = 0; i < MAX_SUPPORTED_RC_CHANNEL_COUNT; i++)
+        mixInput[MIXER_IN_RC_CHANNEL_1 + i] = (rcData[i] - rxConfig()->midrc) * MIXER_RC_SCALING;
 
-    mixerInput[MIXER_IN_STABILIZED_THROTTLE]   = mixerInput[MIXER_IN_RCCMD_THROTTLE];
-    mixerInput[MIXER_IN_STABILIZED_COLLECTIVE] = mixerInput[MIXER_IN_RCCMD_COLLECTIVE];
+    mixInput[MIXER_IN_STABILIZED_ROLL]        = pidData[FD_ROLL].Sum  * MIXER_PID_SCALING;
+    mixInput[MIXER_IN_STABILIZED_PITCH]       = pidData[FD_PITCH].Sum * MIXER_PID_SCALING;
+    mixInput[MIXER_IN_STABILIZED_YAW]         = pidData[FD_YAW].Sum   * MIXER_PID_SCALING;
 
-    for (int i = 0; i < 16; i++)
-        mixerInput[MIXER_IN_RCDATA_0 + i] = (rcData[i] - rxConfig()->midrc) * MIXER_RC_SCALING;
+    // TODO
+    mixInput[MIXER_IN_STABILIZED_COLLECTIVE]  = mixInput[MIXER_IN_RC_COMMAND_COLLECTIVE];
 
     governorUpdate();
 
-    mixerInput[MIXER_IN_GOVERNOR_MAIN] = getGovernorOutput(0);
-    mixerInput[MIXER_IN_GOVERNOR_TAIL] = getGovernorOutput(1);
+    mixInput[MIXER_IN_GOVERNOR_MAIN] = getGovernorOutput(GOV_MAIN);
+    mixInput[MIXER_IN_GOVERNOR_TAIL] = getGovernorOutput(GOV_TAIL);
 
-    // Current cyclic deflection
-    cyclicTotal = sqrtf(mixerInput[MIXER_IN_STABILIZED_ROLL] * mixerInput[MIXER_IN_STABILIZED_ROLL] +
-                        mixerInput[MIXER_IN_STABILIZED_PITCH] * mixerInput[MIXER_IN_STABILIZED_PITCH]);
+    // Cyclic deflection
+    cyclicTotal = sqrtf(mixInput[MIXER_IN_STABILIZED_ROLL] * mixInput[MIXER_IN_STABILIZED_ROLL] +
+                        mixInput[MIXER_IN_STABILIZED_PITCH] * mixInput[MIXER_IN_STABILIZED_PITCH]);
 
     // Cyclic ring limit reached
     if (cyclicTotal > cyclicLimit) {
-        mixerInput[MIXER_IN_STABILIZED_ROLL]  *= cyclicLimit / cyclicTotal;
-        mixerInput[MIXER_IN_STABILIZED_PITCH] *= cyclicLimit / cyclicTotal;
+        mixInput[MIXER_IN_STABILIZED_ROLL]  *= cyclicLimit / cyclicTotal;
+        mixInput[MIXER_IN_STABILIZED_PITCH] *= cyclicLimit / cyclicTotal;
     }
 
     // Input override
     if (!ARMING_FLAG(ARMED)) {
         for (int i = 1; i < MIXER_INPUT_COUNT; i++) {
-            if (mixerOverride[i] >= MIXER_OVERRIDE_MIN && mixerOverride[i] <= MIXER_OVERRIDE_MAX)
-                mixerInput[i] = mixerOverride[i] / 1000.0f;
-        }
-    }
-
-
-    // Reset outputs
-    for (int i = 0; i < MIXER_OUTPUT_COUNT; i++) {
-        mixerOutput[i] = 0;
-    }
-
-    // Calculate mixer outputs
-    for (int i = 0; i < mixerRuleCount; i++) {
-        int src = mixer[i].input;
-        int dst = mixer[i].output;
-        float val = constrainf(mixer[i].offset + mixerInput[src] * mixer[i].rate, mixer[i].min, mixer[i].max) / 1000.0f;
-
-        switch (mixer[i].oper)
-        {
-            case MIXER_OP_SET:
-                mixerOutput[dst] = val;
-                break;
-            case MIXER_OP_ADD:
-                mixerOutput[dst] += val;
-                break;
-            case MIXER_OP_MUL:
-                mixerOutput[dst] *= val;
-                break;
+            if (mixOverride[i] >= MIXER_OVERRIDE_MIN && mixOverride[i] <= MIXER_OVERRIDE_MAX)
+                mixInput[i] = mixOverride[i] * 1e-3;
         }
     }
 }
 
+void mixerUpdate(void)
+{
+    // Fetch input values
+    mixerUpdateInputs();
+
+    // Reset saturation
+    for (int i = 0; i < MIXER_INPUT_COUNT; i++) {
+        mixSaturated[i] = false;
+    }
+
+    // Reset outputs
+    for (int i = 0; i < MIXER_OUTPUT_COUNT; i++) {
+        mixOutput[i] = 0;
+    }
+
+    // Current flight mode bitmap
+    flightModeMask = ((uint32_t)(~flightModeFlags)) << 16 | flightModeFlags;
+
+    // Calculate mixer outputs
+    for (int i = 0; i < MIXER_RULE_COUNT; i++)
+    {
+        if (rules[i].oper && ((rules[i].mode == 0) || (rules[i].mode & flightModeMask))) {
+            uint8_t src = rules[i].input;
+            uint8_t dst = rules[i].output;
+
+            float val = mixerConstrainf(src, inputs[src].offset + inputs[src].rate * mixInput[src], inputs[src].min, inputs[src].max);
+            float out = mixerConstrainf(src, rules[i].offset + rules[i].rate * val, rules[i].min, rules[i].max);
+
+            switch (rules[i].oper)
+            {
+                case MIXER_OP_SET:
+                    mixOutput[dst] = out;
+                    break;
+                case MIXER_OP_ADD:
+                    mixOutput[dst] += out;
+                    break;
+                case MIXER_OP_MUL:
+                    mixOutput[dst] *= out;
+                    break;
+            }
+        }
+    }
+}
+
+void mixerSaturateOutput(uint8_t n)
+{
+    for (int i = MIXER_RULE_COUNT-1; i >= 0; i--) {
+        if (rules[i].oper && ((rules[i].mode == 0) || (rules[i].mode & flightModeMask))) {
+            if (rules[i].output == n) {
+                mixSaturated[ rules[i].input ] = true;
+                if (rules[i].oper == MIXER_OP_SET)
+                    return;
+            }
+        }
+    }
+}
+
+void mixerSaturateInput(uint8_t i)
+{
+    mixSaturated[i] = true;
+}
+
+bool mixerInputSaturated(uint8_t i)
+{
+    return mixSaturated[i];
+}
 
 float mixerGetInput(uint8_t i)
 {
-    return mixerInput[i];
+    return mixInput[i];
 }
 
 float mixerGetServoOutput(uint8_t i)
 {
-    return mixerOutput[i];
+    return mixOutput[MIXER_SERVO_OFFSET + i];
 }
 
 float mixerGetMotorOutput(uint8_t i)
 {
-    return mixerOutput[i + MIXER_OUTPUT_MOTORS];
+    return mixOutput[MIXER_MOTOR_OFFSET + i];
+}
+
+uint8_t mixerGetActiveServos(void)
+{
+    return activeServos;
+}
+
+uint8_t mixerGetActiveMotors(void)
+{
+    return activeMotors;
+}
+
+int16_t mixerGetOverride(uint8_t i)
+{
+    return mixOverride[i];
+}
+
+int16_t mixerSetOverride(uint8_t i, int16_t value)
+{
+    return mixOverride[i] = value;
 }
 
 float getCyclicDeflection(void)
 {
     return MIN(cyclicTotal / cyclicLimit, 1.0f);
-}
-
-uint8_t mixerGetActiveServos(void)
-{
-    return mixerActiveServos;
-}
-
-uint8_t mixerGetActiveMotors(void)
-{
-    return mixerActiveMotors;
-}
-
-int16_t mixerGetOverride(uint8_t i)
-{
-    return mixerOverride[i];
-}
-
-int16_t mixerSetOverride(uint8_t i, int16_t value)
-{
-    return mixerOverride[i] = value;
 }
 
