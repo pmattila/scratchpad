@@ -176,7 +176,6 @@ typedef struct pidAxisData_s {
     float D;
     float F;
     float Sum;
-    float SumLim;
 } pidAxisData_t;
 
 extern const char pidNames[];

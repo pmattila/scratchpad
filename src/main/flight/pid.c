@@ -953,14 +953,12 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
 
         // Check to ensure we are spooled up at a reasonable level
         if (isHeliSpooledUp()) {
-            if (axis == FD_ROLL || axis == FD_PITCH) {
-                // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
-                if (fabsf(pidData[axis].Sum) >= pidProfile->pidSumLimit) {
-                    acErrorRate = 0;
-                }
+            // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+            float pidSumLimit = (axis == FD_YAW) ? pidProfile->pidSumLimitYaw : pidProfile->pidSumLimit;
+            if (fabsf(pidData[axis].Sum) > pidSumLimit || mixerPidAxisSaturated(axis)) {
+                acErrorRate = 0;
             }
-            axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT,
-                -acErrorLimit, acErrorLimit);
+            axisError[axis] = constrainf(axisError[axis] + acErrorRate * dT, -acErrorLimit, acErrorLimit);
             const float acCorrection = constrainf(axisError[axis] * acGain, -acLimit, acLimit);
             *currentPidSetpoint += acCorrection;
             *itermErrorRate += acCorrection;
@@ -1143,11 +1141,10 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // -----calculate I component
         float Ki = pidCoefficient[axis].Ki;
-        if (axis == FD_ROLL || axis == FD_PITCH) {
-            // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
-            if (fabsf(pidData[axis].Sum) >= pidProfile->pidSumLimit) {
-                Ki = 0;
-            }
+        float pidSumLimit = (axis == FD_YAW) ? pidProfile->pidSumLimitYaw : pidProfile->pidSumLimit;
+        // Don't accumulate error if we hit our pidsumLimit on the previous loop through.
+        if (fabsf(pidData[axis].Sum) > pidSumLimit || mixerPidAxisSaturated(axis)) {
+            Ki = 0;
         }
         pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
 
@@ -1299,10 +1296,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         // calculating the PID sum
         pidData[axis].Sum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
-
-        // Limited PID sum
-        const float pidLimit = (axis == FD_YAW) ? currentPidProfile->pidSumLimitYaw : currentPidProfile->pidSumLimit;
-        pidData[axis].SumLim = constrainf(pidData[axis].Sum, -pidLimit, pidLimit);
     }
 
     // Disable PID control if gyro overflow detected
@@ -1314,7 +1307,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidData[axis].D = 0;
             pidData[axis].F = 0;
             pidData[axis].Sum = 0;
-            pidData[axis].SumLim = 0;
         }
     }
 }
