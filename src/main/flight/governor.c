@@ -61,6 +61,14 @@ PG_RESET_TEMPLATE(governorConfig_t, governorConfig,
     .gov_cyclic_ff_gain = 0,
     .gov_collective_ff_gain = 0,
     .gov_collective_ff_impulse_gain = 0,
+    .gov_vbat_offset = 0,
+    .gov_ff_exponent = 150,
+    .gov_in_filter = 10,
+    .gov_pt_filter = 50,
+    .gov_cs_filter = 1000,
+    .gov_cf_filter = 1000,
+    .gov_cg_filter = 1000,
+    .gov_st_filter = 1000,
 );
 
 
@@ -108,6 +116,59 @@ static FAST_RAM_ZERO_INIT float govCollectivePulseFF;
 static FAST_RAM_ZERO_INIT float govSetpoint;
 static FAST_RAM_ZERO_INIT float govSetpointLimited;
 
+static FAST_RAM_ZERO_INIT float ffExponent;
+static FAST_RAM_ZERO_INIT float vbOffset;
+
+static FAST_RAM_ZERO_INIT float inFilter;
+static FAST_RAM_ZERO_INIT float stFilter;
+static FAST_RAM_ZERO_INIT float csFilter;
+static FAST_RAM_ZERO_INIT float cfFilter;
+static FAST_RAM_ZERO_INIT float cgFilter;
+static FAST_RAM_ZERO_INIT float ptFilter;
+
+
+//// Statistics
+
+static FAST_RAM_ZERO_INIT uint32_t stCount;
+static FAST_RAM_ZERO_INIT uint32_t stActiveCount;
+static FAST_RAM_ZERO_INIT uint32_t stSpoolupCount;
+
+static FAST_RAM_ZERO_INIT float vbValue;
+static FAST_RAM_ZERO_INIT float vbMean;
+
+static FAST_RAM_ZERO_INIT float ibValue;
+static FAST_RAM_ZERO_INIT float ibMean;
+
+static FAST_RAM_ZERO_INIT float hsValue;
+static FAST_RAM_ZERO_INIT float hsDiff;
+static FAST_RAM_ZERO_INIT float hsMean;
+static FAST_RAM_ZERO_INIT float hsVar;
+
+static FAST_RAM_ZERO_INIT float vtValue;
+static FAST_RAM_ZERO_INIT float vtDiff;
+static FAST_RAM_ZERO_INIT float vtMean;
+static FAST_RAM_ZERO_INIT float vtVar;
+
+static FAST_RAM_ZERO_INIT float cxValue;
+static FAST_RAM_ZERO_INIT float cxDiff;
+static FAST_RAM_ZERO_INIT float cxMean;
+static FAST_RAM_ZERO_INIT float cxVar;
+
+static FAST_RAM_ZERO_INIT float ffValue;
+static FAST_RAM_ZERO_INIT float ffDiff;
+static FAST_RAM_ZERO_INIT float ffMean;
+static FAST_RAM_ZERO_INIT float ffVar;
+
+static FAST_RAM_ZERO_INIT float hsvtCovar;
+static FAST_RAM_ZERO_INIT float cxffCovar;
+
+static FAST_RAM_ZERO_INIT float ccValue;
+static FAST_RAM_ZERO_INIT float csValue;
+static FAST_RAM_ZERO_INIT float cfValue;
+
+static FAST_RAM_ZERO_INIT float csEstimate;
+static FAST_RAM_ZERO_INIT float cfEstimate;
+
 
 typedef float (*throttle_f)(void);
 
@@ -154,6 +215,143 @@ static inline float idleMap(float throttle)
 }
 
 
+static void govSaveCalibration(void)
+{
+    governorConfigMutable()->gov_calibration[0] = 1e6f * csEstimate;
+    governorConfigMutable()->gov_calibration[1] = 1e6f * cfEstimate;
+    governorConfigMutable()->gov_calibration[2] = 1e3f * cfEstimate / csEstimate;
+
+    saveConfigAndNotify();
+}
+
+static void govResetStats(void)
+{
+    vtValue   = cxValue   = 0;
+    ccValue   = csValue   = cfValue  = 0;
+    vtMean    = cxMean    = hsMean   = ffMean = 0;
+    vtDiff    = cxDiff    = hsDiff   = ffDiff = 0;
+    vtVar     = cxVar     = hsVar    = ffVar  = 0;
+    cxffCovar = hsvtCovar = 0;
+    stCount = stActiveCount = stSpoolupCount = 0;
+}
+
+static void govDebugStats(void)
+{
+    const float govMain = govOutput[GOV_MAIN];
+
+    DEBUG_SET(DEBUG_GOVERNOR,  0, govSetpointLimited);
+    DEBUG_SET(DEBUG_GOVERNOR,  1, govHeadSpeed);
+    DEBUG_SET(DEBUG_GOVERNOR,  2, govPidSum * 1000.0f);
+    DEBUG_SET(DEBUG_GOVERNOR,  3, govMain * 1000.0f);
+}
+
+
+static void govUpdateStats(void)
+{
+    float govMain = govOutput[GOV_MAIN];
+
+    // Increment statistics count
+    stCount++;
+
+    // ESC voltage
+    vbValue = getBatteryVoltageLatest() * 0.01f;
+    vbMean += (vbValue - vbMean) * inFilter;
+
+    // ESC Current
+    ibValue = getAmperageLatest() * 0.01f;
+    ibMean += (ibValue - ibMean) * inFilter;
+
+    // Headspeed value
+    hsValue += (govHeadSpeed - hsValue) * inFilter;
+
+    // Analysis
+    if (govMain > 0.10f && hsValue > 100)
+    {
+        vtValue = (vbMean - vbOffset) * govMain;
+        cxValue = vtValue / hsValue;
+
+        hsDiff = hsValue - hsMean;
+        vtDiff = vtValue - vtMean;
+        cxDiff = cxValue - cxMean;
+        ffDiff = ffValue - ffMean;
+
+        hsMean += hsDiff * stFilter;
+        vtMean += vtDiff * stFilter;
+        cxMean += cxDiff * stFilter;
+        ffMean += ffDiff * stFilter;
+
+        float tsFilter = 1.0f - stFilter;
+
+        hsVar = (hsDiff * hsDiff * stFilter + hsVar) * tsFilter;
+        vtVar = (vtDiff * vtDiff * stFilter + vtVar) * tsFilter;
+        cxVar = (cxDiff * cxDiff * stFilter + cxVar) * tsFilter;
+        ffVar = (ffDiff * ffDiff * stFilter + ffVar) * tsFilter;
+
+        hsvtCovar = (hsDiff * vtDiff * stFilter + hsvtCovar) * tsFilter;
+        cxffCovar = (cxDiff * ffDiff * stFilter + cxffCovar) * tsFilter;
+    }
+}
+
+static void govUpdateSpoolupStats(float govMain)
+{
+    if (govMain > 0.10f && govHeadSpeed > 100) {
+        // Increment statistics count
+        stSpoolupCount++;
+
+        // For analysis -- not used in the model
+        if (hsVar > 100) {
+            csValue = hsvtCovar / hsVar;
+            ccValue = vtMean - hsMean * csValue;
+        }
+
+        // Initial value for Cs
+        csEstimate = cxMean;
+
+        // Initial value for Cf
+        if (governorConfig()->gov_calibration[2] > 0)
+            cfEstimate = csEstimate * governorConfig()->gov_calibration[2] / 1000.0f;
+        else
+            cfEstimate = csEstimate;
+    }
+}
+
+static void govUpdateActiveStats(float govMain)
+{
+    bool mainCheck = true, pidCheck = true, hsCheck = true;
+
+    // Increment statistics count
+    stActiveCount++;
+
+    // throttle must be between 25%..95%
+    mainCheck = (govMain > 0.25f && govMain < 0.95f);
+
+    // Headspeed must be reasonable
+    if (govMode == GM_PASSTHROUGH)
+        hsCheck = (govHeadSpeed > 100);
+    else
+        hsCheck = (govHeadSpeed > govMaxHeadspeed * 0.1f && govHeadSpeed < govMaxHeadspeed * 1.1f);
+
+    // System must stay in linear & controllable area for the stats to be correct
+    if (mainCheck && pidCheck && hsCheck)
+    {
+        if (ffVar > 0.01f)
+            cfValue = cxffCovar / ffVar;
+        else
+            cfValue = cfEstimate;
+
+        cfValue = constrainf(cfValue, 0, 2*csEstimate);
+
+        if (cfValue > cfEstimate)
+            cfEstimate += (cfValue - cfEstimate) * ffVar * ffMean * cfFilter;
+        else
+            cfEstimate += (cfValue - cfEstimate) * ffVar * ffMean * cgFilter;
+
+        csValue = cxMean - ffMean * cfValue;
+
+        csEstimate += (csValue - csEstimate) * csFilter;
+    }
+}
+
 static void govUpdateFeedForward(void)
 {
     // Calculate linear feedforward vs. collective absolute position
@@ -167,11 +365,14 @@ static void govUpdateFeedForward(void)
 
     // Total FeedForward
     govFeedForward = govCollectiveFF + govCollectivePulseFF + govCyclicFF;
+
+    // Aerodynamic drag vs angle of attack approx
+    ffValue = powf( 10.0f * govFeedForward, ffExponent );
 }
 
 
 /*
- * Throttle passthrough with spoolup
+ * This is generally a throttle passthrough, but with extra stats.
  */
 
 static void governorUpdatePassthrough(void)
@@ -186,9 +387,13 @@ static void governorUpdatePassthrough(void)
     // Calculate collective/cyclic feedforward
     govUpdateFeedForward();
 
+    // Update statistics
+    govUpdateStats();
+
     // Handle DISARM separately for SAFETY!
     if (!ARMING_FLAG(ARMED)) {
         govChangeState(GS_THROTTLE_OFF);
+        govResetStats();
     }
     else {
         switch (govState)
@@ -223,6 +428,8 @@ static void governorUpdatePassthrough(void)
                     govChangeState(GS_THROTTLE_IDLE);
                 else if (govMain >= throttle)
                     govChangeState(GS_ACTIVE);
+                else
+                    govUpdateSpoolupStats(govMain);
                 break;
 
             // Follow the throttle without ramp limits.
@@ -237,7 +444,8 @@ static void governorUpdatePassthrough(void)
                         govChangeState(GS_AUTOROTATION);
                     else
                         govChangeState(GS_THROTTLE_IDLE);
-                }
+                } else
+                    govUpdateActiveStats(govMain);
                 break;
 
             // Throttle is low. If it is a mistake, give a chance to recover.
@@ -293,12 +501,16 @@ static void governorUpdatePassthrough(void)
             // Should not be here
             default:
                 govChangeState(GS_THROTTLE_OFF);
+                govResetStats();
                 break;
         }
     }
 
     // Update output variables
     govOutput[GOV_MAIN] = govMain;
+
+    // Set debug
+    govDebugStats();
 }
 
 
@@ -321,9 +533,13 @@ static void governorUpdateState(throttle_f govCalc)
     // Calculate collective/cyclic feedforward
     govUpdateFeedForward();
 
+    // Update statistics
+    govUpdateStats();
+
     // Handle throttle off separately for SAFETY!
     if (!ARMING_FLAG(ARMED)) {
         govChangeState(GS_THROTTLE_OFF);
+        govResetStats();
     }
     else {
         switch (govState)
@@ -333,6 +549,10 @@ static void governorUpdateState(throttle_f govCalc)
                 govMain = 0;
                 if (!throttleLow)
                     govChangeState(GS_THROTTLE_IDLE);
+                if (stActiveCount > pidGetPidFrequency() * 30) {
+                    govSaveCalibration();
+                    govResetStats();
+                }
                 break;
 
             // Throttle is IDLE, follow with a limited ramupup rate.
@@ -366,7 +586,8 @@ static void governorUpdateState(throttle_f govCalc)
                     govSetpointLimited = govHeadSpeed;
                     govBaseThrottle = govMain;
                     govP = govI = 0;
-                }
+                } else
+                    govUpdateSpoolupStats(govMain);
                 break;
 
             // Governor active, maintain headspeed
@@ -386,6 +607,7 @@ static void governorUpdateState(throttle_f govCalc)
                         govChangeState(GS_THROTTLE_IDLE);
                 } else {
                     govMain = govCalc();
+                    govUpdateActiveStats(govMain);
                 }
                 break;
 
@@ -469,17 +691,21 @@ static void governorUpdateState(throttle_f govCalc)
             // Should not be here
             default:
                 govChangeState(GS_THROTTLE_OFF);
+                govResetStats();
         }
     }
 
     // Update output variables
     govOutput[GOV_MAIN] = govMain;
+
+    // Set debug
+    govDebugStats();
 }
 
 
 
 /*
- * Standard Proportional-Integral-Feedforward (PIF) controller
+ * Standard PIF controller
  */
 
 static float govPIFControl(void)
@@ -496,10 +722,10 @@ static float govPIFControl(void)
     }
 
     // Calculate error ratio
-    govError = (govSetpointLimited - govHeadSpeed) / govMaxHeadspeed;
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
 
     // if gov_p_gain = 10 (govKp = 1), we will get 1% change in throttle for 1% error in headspeed
-    govP = govKp * govError;
+    govP += (govKp * govError - govP) * ptFilter;
 
     // PID limits
     govP = constrainf(govP, -0.20f, 0.20f);
@@ -525,6 +751,136 @@ static float govPIFControl(void)
 }
 
 
+/*
+ * Extended PIF controller
+ */
+
+static float govEPIFControl(void)
+{
+    float output = 0;
+
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
+
+    // Calculate error
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
+
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
+
+    // PID limits
+    govP = constrainf(govP, -0.20f, 0.20f);
+    govI = constrainf(govI, -1.00f, 1.00f);
+
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
+
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
+
+    // Generate throttle signal
+    output = govSetpointLimited * (govPidSum + govFeedForward) * 0.005f / (vbMean - vbOffset);
+
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
+
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
+
+    return output;
+}
+
+
+/*
+ * This is an advanced estimator model, with system identification.
+ */
+
+static float govMEPIControl(void)
+{
+    float output = 0;
+
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
+
+    // Calculate error ratio
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
+
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
+
+    // PID limits
+    govP = constrainf(govP, -0.10f, 0.10f);
+    govI = constrainf(govI, -0.05f, 0.05f);
+
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
+
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
+
+    // Calculate throttle estimate from the model
+    float tqEstimate = cfEstimate * ffValue + csEstimate;
+    float thEstimate = (govSetpointLimited * tqEstimate) / (vbMean - vbOffset);
+
+    // Generate throttle signal
+    output = thEstimate + govPidSum;
+
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
+
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
+
+    return output;
+}
+
+
+/*
+ * This is an advanced estimator model, with system identification.
+ */
+
+static float govAEPIControl(void)
+{
+    float output = 0;
+
+    // Adjust the rate limited governor setpoint
+    govSetpointLimited = rampLimit(govSetpoint, govSetpointLimited, govSetpointRate);
+
+    // Calculate error ratio
+    govError = (govSetpointLimited - hsValue) / govMaxHeadspeed;
+
+    // P-term filter
+    govP += (govKp * govError - govP) * ptFilter;
+
+    // PID limits
+    govP = constrainf(govP, -0.20f, 0.20f);
+    govI = constrainf(govI, -0.10f, 0.10f);
+
+    // I-term change
+    float deltaI = govKi * govError * pidGetDT();
+
+    // Governor PI sum
+    govPidSum = govP + govI + deltaI;
+
+    // Calculate throttle estimate from the model
+    float tqEstimate = cfEstimate * ffValue + csEstimate + govPidSum * 0.005f;
+    float thEstimate = (govSetpointLimited * tqEstimate) / (vbMean - vbOffset);
+
+    // Generate throttle signal
+    output = thEstimate;
+
+    // Apply deltaI if output not saturated
+    if (!((output > 1 && deltaI > 0) || (output < 0 && deltaI < 0)))
+        govI += deltaI;
+
+    // Limit output to 0%..100%
+    output = constrainf(output, 0, 1);
+
+    return output;
+}
+
 
 void governorUpdate(void)
 {
@@ -534,6 +890,15 @@ void governorUpdate(void)
             break;
         case GM_STANDARD:
             governorUpdateState(govPIFControl);
+            break;
+        case GM_EPIF:
+            governorUpdateState(govEPIFControl);
+            break;
+        case GM_MEPI:
+            governorUpdateState(govMEPIControl);
+            break;
+        case GM_AEPI:
+            governorUpdateState(govAEPIControl);
             break;
     }
 }
@@ -569,6 +934,16 @@ void governorInit(void)
 
         govLostThrottleTimeout  = governorConfig()->gov_lost_throttle_timeout * 100;
         govLostHeadspeedTimeout = governorConfig()->gov_lost_headspeed_timeout * 100;
+
+        ffExponent = (float)governorConfig()->gov_ff_exponent / 100.0f;
+        vbOffset   = (float)governorConfig()->gov_vbat_offset / 100.0f;
+
+        inFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_in_filter);
+        stFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_st_filter);
+        csFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cs_filter);
+        cfFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cf_filter);
+        cgFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_cg_filter);
+        ptFilter = (float)1000.0f / (pidGetPidFrequency() * governorConfig()->gov_pt_filter);
     }
 }
 
