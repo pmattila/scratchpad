@@ -35,31 +35,30 @@ enum {
     MIXER_IN_STABILIZED_ROLL,
     MIXER_IN_STABILIZED_PITCH,
     MIXER_IN_STABILIZED_YAW,
-    MIXER_IN_STABILIZED_THROTTLE,
     MIXER_IN_STABILIZED_COLLECTIVE,
-    MIXER_IN_RCCMD_ROLL,
-    MIXER_IN_RCCMD_PITCH,
-    MIXER_IN_RCCMD_YAW,
-    MIXER_IN_RCCMD_THROTTLE,
-    MIXER_IN_RCCMD_COLLECTIVE,
-    MIXER_IN_RCDATA_0,
-    MIXER_IN_RCDATA_1,
-    MIXER_IN_RCDATA_2,
-    MIXER_IN_RCDATA_3,
-    MIXER_IN_RCDATA_4,
-    MIXER_IN_RCDATA_5,
-    MIXER_IN_RCDATA_6,
-    MIXER_IN_RCDATA_7,
-    MIXER_IN_RCDATA_8,
-    MIXER_IN_RCDATA_9,
-    MIXER_IN_RCDATA_10,
-    MIXER_IN_RCDATA_11,
-    MIXER_IN_RCDATA_12,
-    MIXER_IN_RCDATA_13,
-    MIXER_IN_RCDATA_14,
-    MIXER_IN_RCDATA_15,
-    MIXER_IN_RCDATA_16,
-    MIXER_IN_RCDATA_17,
+    MIXER_IN_RC_COMMAND_ROLL,
+    MIXER_IN_RC_COMMAND_PITCH,
+    MIXER_IN_RC_COMMAND_YAW,
+    MIXER_IN_RC_COMMAND_COLLECTIVE,
+    MIXER_IN_RC_COMMAND_THROTTLE,
+    MIXER_IN_RC_CHANNEL_1,
+    MIXER_IN_RC_CHANNEL_2,
+    MIXER_IN_RC_CHANNEL_3,
+    MIXER_IN_RC_CHANNEL_4,
+    MIXER_IN_RC_CHANNEL_5,
+    MIXER_IN_RC_CHANNEL_6,
+    MIXER_IN_RC_CHANNEL_7,
+    MIXER_IN_RC_CHANNEL_8,
+    MIXER_IN_RC_CHANNEL_9,
+    MIXER_IN_RC_CHANNEL_10,
+    MIXER_IN_RC_CHANNEL_11,
+    MIXER_IN_RC_CHANNEL_12,
+    MIXER_IN_RC_CHANNEL_13,
+    MIXER_IN_RC_CHANNEL_14,
+    MIXER_IN_RC_CHANNEL_15,
+    MIXER_IN_RC_CHANNEL_16,
+    MIXER_IN_RC_CHANNEL_17,
+    MIXER_IN_RC_CHANNEL_18,
     MIXER_IN_COUNT
 };
 
@@ -78,8 +77,14 @@ enum {
 #define MIXER_OUTPUT_COUNT    (MAX_SUPPORTED_SERVOS + MAX_SUPPORTED_MOTORS)
 #define MIXER_OUTPUT_MOTORS   MAX_SUPPORTED_SERVOS
 
-#define MIXER_OVERRIDE_MIN   -1250
-#define MIXER_OVERRIDE_MAX    1250
+#define MIXER_RATE_MIN       -5000
+#define MIXER_RATE_MAX        5000
+
+#define MIXER_INPUT_MIN      -2000
+#define MIXER_INPUT_MAX       2000
+
+#define MIXER_OVERRIDE_MIN   -2000
+#define MIXER_OVERRIDE_MAX    2000
 #define MIXER_OVERRIDE_OFF    (MIXER_OVERRIDE_MAX + 1)
 
 #define MIXER_RC_SCALING      (1.0f / 500)
@@ -90,18 +95,28 @@ enum {
 #define MIXER_CUSTOM          23
 
 
-typedef struct mixer_s
+typedef struct
 {
-    uint8_t oper;              // rule operation
-    uint8_t input;             // input channel
-    uint8_t output;            // output channel
-    int16_t offset;            // output offset -2000..2000%%
-    int16_t rate;              // range [-2000;+2000] ; can be used to adjust rate 0-2000%% and direction
-    int16_t min;               // lower bound of rule range -1000..1000%%
-    int16_t max;               // lower bound of rule range -1000..1000%%
-} mixer_t;
+    int16_t   rate;             // rate multiplier
+    int16_t   min;              // minimum value
+    int16_t   max;              // maximum value
+} mixerInput_t;
 
-PG_DECLARE_ARRAY(mixer_t, MIXER_RULE_COUNT, mixerRules);
+PG_DECLARE_ARRAY(mixerInput_t, MIXER_INPUT_COUNT, mixerInputs);
+
+typedef struct
+{
+    uint32_t  mode;              // active flight mode bitmap
+    uint8_t   oper;              // rule operation
+    uint8_t   input;             // input channel
+    uint8_t   output;            // output channel
+    int16_t   offset;            // output offset -2000..2000%%
+    int16_t   rate;              // range [-2000;+2000] ; can be used to adjust rate 0-2000%% and direction
+    int16_t   min;               // lower bound of rule range -1000..1000%%
+    int16_t   max;               // lower bound of rule range -1000..1000%%
+} mixerRule_t;
+
+PG_DECLARE_ARRAY(mixerRule_t, MIXER_RULE_COUNT, mixerRules);
 
 
 void mixerInit(void);
@@ -119,7 +134,12 @@ uint8_t mixerGetActiveMotors(void);
 int16_t mixerGetOverride(uint8_t i);
 int16_t mixerSetOverride(uint8_t i, int16_t value);
 
+void mixerSaturateOutput(uint8_t i);
+void mixerSaturateInput(uint8_t i);
+
+bool mixerInputSaturated(uint8_t i);
+
 float getCyclicDeflection(void);
 
-static inline float mixerGetThrottle(void) { return mixerGetInput(MIXER_IN_STABILIZED_THROTTLE); }
+static inline float mixerGetThrottle(void) { return mixerGetInput(MIXER_IN_RC_COMMAND_THROTTLE); }
 
