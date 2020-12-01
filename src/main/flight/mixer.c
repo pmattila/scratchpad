@@ -100,7 +100,7 @@ static FAST_RAM_ZERO_INIT float       cyclicTotal;
 static FAST_RAM_ZERO_INIT float       cyclicLimit;
 
 
-static inline float mixSaturatef(uint8_t index, float val, float min, float max)
+static inline float mixerSaturatef(uint8_t index, float val, float min, float max)
 {
     if (val > max) {
         mixSaturated[index] = true;
@@ -159,7 +159,7 @@ void mixerInitProfile(void)
     cyclicLimit = currentPidProfile->pidSumLimit * MIXER_PID_SCALING;
 }
 
-void mixerUpdate(void)
+static void mixerUpdateInputs(void)
 {
     mixInput[MIXER_IN_RC_COMMAND_ROLL]        = rcCommand[ROLL]       * MIXER_RC_SCALING;
     mixInput[MIXER_IN_RC_COMMAND_PITCH]       = rcCommand[PITCH]      * MIXER_RC_SCALING;
@@ -196,13 +196,18 @@ void mixerUpdate(void)
     // Input override
     if (!ARMING_FLAG(ARMED)) {
         for (int i = 1; i < MIXER_INPUT_COUNT; i++) {
-            if (mixOverride[i] >= MIXER_OVERRIDE_MIN &&
-                mixOverride[i] <= MIXER_OVERRIDE_MAX)
+            if (mixOverride[i] >= MIXER_OVERRIDE_MIN && mixOverride[i] <= MIXER_OVERRIDE_MAX)
                 mixInput[i] = mixOverride[i] * 1e-3;
         }
     }
+}
 
-    // Reset inputs
+void mixerUpdate(void)
+{
+    // Fetch input values
+    mixerUpdateInputs();
+
+    // Reset saturation
     for (int i = 0; i < MIXER_INPUT_COUNT; i++) {
         mixSaturated[i] = false;
     }
@@ -222,8 +227,8 @@ void mixerUpdate(void)
             uint8_t src = rules[i].input;
             uint8_t dst = rules[i].output;
 
-            float val = mixSaturatef(src, mixInput[src], inputs[src].min, inputs[src].max) * inputs[src].rate;
-            float out = mixSaturatef(src, rules[i].offset + rules[i].rate * val, rules[i].min, rules[i].max);
+            float val = mixerSaturatef(src, mixInput[src], inputs[src].min, inputs[src].max) * inputs[src].rate;
+            float out = mixerSaturatef(src, rules[i].offset + rules[i].rate * val, rules[i].min, rules[i].max);
 
             switch (rules[i].oper)
             {
@@ -243,7 +248,7 @@ void mixerUpdate(void)
 
 void mixerSaturateOutput(uint8_t n)
 {
-    for (int i = MIXER_RULE_COUNT - 1; i >= 0; i--) {
+    for (int i = MIXER_RULE_COUNT-1; i >= 0; i--) {
         if (rules[i].oper) {
             if (rules[i].output == n) {
                 mixSaturated[ rules[i].input ] = true;
