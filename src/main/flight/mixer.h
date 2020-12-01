@@ -139,6 +139,9 @@ void mixerSaturateInput(uint8_t i);
 
 bool mixerInputSaturated(uint8_t i);
 
+static inline void mixerSaturateServoOutput(uint8_t i) { mixerSaturateOutput(i); }
+static inline void mixerSaturateMotorOutput(uint8_t i) { mixerSaturateOutput(i + MIXER_OUTPUT_MOTORS); }
+
 float getCyclicDeflection(void);
 
 static inline float mixerGetThrottle(void) { return mixerGetInput(MIXER_IN_RC_COMMAND_THROTTLE); }
