@@ -125,7 +125,7 @@ void mixerInit(void)
         const mixerRule_t *rule = mixerRules(i);
 
         if (rule->oper) {
-            rules[i].mode    = (rule->mode) ? rule->mode : 0xffffffff;
+            rules[i].mode    = rule->mode;
             rules[i].oper    = constrain(rule->oper, 1, MIXER_OP_COUNT - 1);
             rules[i].input   = constrain(rule->input, 0, MIXER_INPUT_COUNT -1);
             rules[i].output  = constrain(rule->output, 0, MIXER_OUTPUT_COUNT - 1);
@@ -212,13 +212,13 @@ void mixerUpdate(void)
         mixOutput[i] = 0;
     }
 
-    // Current flight mode
-    uint32_t flightMode = flightModeFlags | BIT(31);
+    // Current flight mode bitmap
+    uint32_t modeMask = ((uint32_t)(~flightModeFlags)) << 16 | flightModeFlags;
 
     // Calculate mixer outputs
     for (int i = 0; i < MIXER_RULE_COUNT; i++)
     {
-        if (rules[i].oper && (rules[i].mode & flightMode)) {
+        if (rules[i].oper && ((rules[i].mode == 0) || (rules[i].mode & modeMask))) {
             uint8_t src = rules[i].input;
             uint8_t dst = rules[i].output;
 

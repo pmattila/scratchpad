@@ -2239,10 +2239,41 @@ static void cliServo(const char *cmdName, char *cmdline)
 }
 #endif
 
+// flightModeMap characters
+//                                          12345678123456781234567812345678
+static const char flightModeMapLetters[] = "RH       FG     rh       fg     ";
+
+static uint32_t parseModeMap(const char *str)
+{
+    uint32_t map = 0;
+
+    while (str && *str) {
+        const char *ptr = strchr(flightModeMapLetters, *str++);
+        if (ptr)
+            map |= BIT(ptr - flightModeMapLetters);
+    }
+
+    return map;
+}
+
+static const char * printModeMap(uint32_t map, char *buf)
+{
+    char *ptr = buf;
+
+    for (unsigned i=0; i<32; i++) {
+        if ((map & BIT(i)) && flightModeMapLetters[i] != ' ')
+            *ptr++ = flightModeMapLetters[i];
+    }
+    *ptr = 0;
+
+    return buf;
+}
+
 static void printMixerRules(dumpFlags_t dumpMask, const mixerRule_t *rules, const mixerRule_t *defaults, const char *headingStr)
 {
-    const char *format = "mixer rule %u %s %s %s %d %d %d %d %d";
+    const char *format = "mixer rule %u %s %s %s %d %d %d %d %s";
     bool equalsDefault = false;
+    char buf[34];
 
     if (defaults) {
         equalsDefault = !memcmp(rules, defaults, sizeof(mixerRule_t)*MIXER_RULE_COUNT);
@@ -2265,7 +2296,7 @@ static void printMixerRules(dumpFlags_t dumpMask, const mixerRule_t *rules, cons
                                  def->rate,
                                  def->min,
                                  def->max,
-                                 def->mode
+                                 printModeMap(def->mode, buf)
             );
         }
         if (rule->oper) {
@@ -2277,7 +2308,7 @@ static void printMixerRules(dumpFlags_t dumpMask, const mixerRule_t *rules, cons
                               rule->rate,
                               rule->min,
                               rule->max,
-                              rule->mode
+                              printModeMap(rule->mode, buf)
             );
         }
     }
@@ -2402,8 +2433,10 @@ static void cliMixer(const char *cmdName, char *cmdline)
             int vals[ARGS_COUNT];
             for (int i=1; i<count; i++)
                 vals[i] = atoi(args[i]);
-            if (count == 9)
-                vals[MODE] = 0xffffffff;
+            if (count == 10)
+                vals[MODE] = parseModeMap(args[MODE]);
+            else
+                vals[MODE] = 0;
             for (unsigned i=0; i<ARRAYLEN(mixerOpNames); i++) {
                 if (strcasecmp(args[OPER], mixerOpNames[i]) == 0)
                     vals[OPER] = i;
