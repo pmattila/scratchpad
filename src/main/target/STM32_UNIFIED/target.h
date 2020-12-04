@@ -111,7 +111,7 @@
 #define TARGET_IO_PORTE 0xffff
 #define TARGET_IO_PORTF 0xffff
 
-//#define USE_DEBUG32
+#define USE_DEBUG32
 
 #elif defined(STM32F745)
 #define TARGET_BOARD_IDENTIFIER "S745"
@@ -150,7 +150,7 @@
 #define TARGET_IO_PORTE 0xffff
 #define TARGET_IO_PORTF 0xffff
 
-//#define USE_DEBUG32
+#define USE_DEBUG32
 
 #endif
 
