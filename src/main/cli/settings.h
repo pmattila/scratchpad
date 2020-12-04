@@ -129,6 +129,7 @@ typedef enum {
 #ifdef USE_OSD
     TABLE_OSD_LOGO_ON_ARMING,
 #endif
+    TABLE_GOVERNOR_MODE,
 
     LOOKUP_TABLE_COUNT
 } lookupTableIndex_e;
