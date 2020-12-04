@@ -26,19 +26,27 @@
 #include "common/axis.h"
 #include "pg/pg.h"
 
-#define MAX_PID_PROCESS_DENOM       16
 #define PID_CONTROLLER_BETAFLIGHT   1
+
+#define MAX_PID_PROCESS_DENOM       16
 
 #define PIDSUM_LIMIT                500
 
-// Scaling factors for Pids for better tunable range in configurator for betaflight pid controller. The scaling is based on legacy pid controller or previous float
-#define PTERM_SCALE 0.032029f
-#define ITERM_SCALE 0.244381f
-#define DTERM_SCALE 0.000529f
+#define ROLL_PTERM_SCALE            0.0032029f
+#define ROLL_ITERM_SCALE            0.0488762f
+#define ROLL_DTERM_SCALE            0.0000529f
 
-// The constant scale factor to replace the Kd component of the feedforward calculation.
-// This value gives the same "feel" as the previous Kd default of 26 (26 * DTERM_SCALE)
-#define FEEDFORWARD_SCALE 0.013754f
+#define PITCH_PTERM_SCALE           0.0032029f
+#define PITCH_ITERM_SCALE           0.0488762f
+#define PITCH_DTERM_SCALE           0.0000529f
+
+#define YAW_PTERM_SCALE             0.032029f
+#define YAW_ITERM_SCALE             0.244381f
+#define YAW_DTERM_SCALE             0.000529f
+
+#define ROLL_FEEDFORWARD_SCALE      0.0123786f
+#define PITCH_FEEDFORWARD_SCALE     0.0123786f
+#define YAW_FEEDFORWARD_SCALE       0.0123786f
 
 // Full iterm suppression in setpoint mode at high-passed setpoint rate > 40deg/sec
 #define ITERM_RELAX_SETPOINT_THRESHOLD 40.0f
@@ -46,6 +54,7 @@
 
 #define ITERM_ACCELERATOR_GAIN_OFF 1000
 #define ITERM_ACCELERATOR_GAIN_MAX 30000
+
 typedef enum {
     PID_ROLL,
     PID_PITCH,
@@ -129,6 +138,14 @@ typedef struct pidProfile_s {
     uint8_t ff_spike_limit;                 // FF stick extrapolation lookahead period in ms
     uint8_t ff_smooth_factor;               // Amount of smoothing for interpolated FF steps
     uint8_t dyn_lpf_curve_expo;             // set the curve for dynamic dterm lowpass filter
+
+    // HF3D parameters
+    uint16_t yawColKf;                      // Feedforward for collective into Yaw
+    uint16_t yawColPulseKf;                 // Feedforward for collective impulse into Yaw
+    uint16_t yawCycKf;                      // Feedforward for cyclic into Yaw
+    uint16_t yawBaseThrust;                 // Base thrust for the tail
+    uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
+
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -189,3 +206,5 @@ float pidGetFfBoostFactor();
 float pidGetFfSmoothFactor();
 float pidGetSpikeLimitInverse();
 float dynDtermLpfCutoffFreq(float throttle, uint16_t dynLpfMin, uint16_t dynLpfMax, uint8_t expo);
+float getCollectiveDeflectionAbs();
+float getCollectiveDeflectionAbsHPF();
