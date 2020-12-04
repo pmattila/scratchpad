@@ -28,8 +28,7 @@
 
 #define MAX_PID_PROCESS_DENOM       16
 #define PID_CONTROLLER_BETAFLIGHT   1
-#define PID_MIXER_SCALING           1000.0f
-#define PID_SERVO_MIXER_SCALING     0.7f
+
 #define PIDSUM_LIMIT                500
 #define PIDSUM_LIMIT_YAW            400
 #define PIDSUM_LIMIT_MIN            100
@@ -153,7 +152,6 @@ typedef struct pidAxisData_s {
     float I;
     float D;
     float F;
-
     float Sum;
 } pidAxisData_t;
 
