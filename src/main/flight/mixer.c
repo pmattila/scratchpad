@@ -38,6 +38,7 @@
 #include "flight/pid.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
+#include "flight/governor.h"
 
 #include "rx/rx.h"
 
@@ -139,6 +140,9 @@ static void mixerUpdateInputs(void)
 
     // TODO
     mixInput[MIXER_IN_STABILIZED_COLLECTIVE]  = mixInput[MIXER_IN_RC_COMMAND_COLLECTIVE];
+
+    mixInput[MIXER_IN_GOVERNOR_MAIN] = getGovernorOutput(GOV_MAIN);
+    mixInput[MIXER_IN_GOVERNOR_TAIL] = getGovernorOutput(GOV_TAIL);
 
     // Cyclic deflection
     cyclicTotal = sqrtf(mixInput[MIXER_IN_STABILIZED_ROLL] * mixInput[MIXER_IN_STABILIZED_ROLL] +
