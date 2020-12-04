@@ -239,6 +239,69 @@ static void govDebugStats(void)
 {
     const float govMain = govOutput[GOV_MAIN];
 
+#ifdef USE_DEBUG32
+
+#define DEBUG32U(index, value)  (debug32[(index)] = (uint32_t)(value))
+#define DEBUG32S(index, value)  (debug32[(index)] = (int32_t)(value))
+#define DEBUG32F(index, value)  (debug32[(index)] = lrintf(value))
+
+    const throttleStatus_e throttleStatus = calculateThrottleStatus();
+    const float throttle = mixerGetThrottle();
+
+    DEBUG32U( 0, govMode);
+    DEBUG32U( 1, govState);
+    DEBUG32U( 2, throttleStatus);
+    DEBUG32F( 3, throttle * 1e6f);
+    DEBUG32F( 4, govSetpoint * 1e3f);
+    DEBUG32F( 5, govSetpointLimited * 1e3f);
+    DEBUG32F( 6, govHeadSpeed * 1e3f);
+    DEBUG32F( 7, govMain * 1e6f);
+    DEBUG32F( 8, govBaseThrottle * 1e6f);
+    DEBUG32F( 9, govFeedForward * 1e6f);
+    DEBUG32F(10, govCollectiveFF * 1e6f);
+    DEBUG32F(11, govCollectivePulseFF * 1e6f);
+    DEBUG32F(12, govCyclicFF * 1e6f);
+    DEBUG32F(13, govPidSum * 1e6f);
+    DEBUG32F(14, govError * 1e6f);
+    DEBUG32F(15, govP * 1e6f);
+    DEBUG32F(16, govI * 1e6f);
+
+    DEBUG32F(17, vbValue * 1e3f);
+    DEBUG32F(18, vbMean * 1e3f);
+    DEBUG32F(19, ibValue * 1e3f);
+    DEBUG32F(20, ibMean * 1e3f);
+
+    DEBUG32F(21, hsValue * 1e3f);
+    DEBUG32F(22, hsDiff * 1e3f);
+    DEBUG32F(23, hsMean * 1e3f);
+    DEBUG32F(24, hsVar * 1e0f);
+
+    DEBUG32F(25, vtValue * 1e3f);
+    DEBUG32F(26, vtDiff * 1e3f);
+    DEBUG32F(27, vtMean * 1e3f);
+    DEBUG32F(28, vtVar * 1e0f);
+
+    DEBUG32F(29, cxValue * 1e6f);
+    DEBUG32F(30, cxDiff * 1e6f);
+    DEBUG32F(31, cxMean * 1e6f);
+    DEBUG32F(32, cxVar * 1e12);
+
+    DEBUG32F(33, ffValue * 1e6f);
+    DEBUG32F(34, ffDiff * 1e6f);
+    DEBUG32F(35, ffMean * 1e6f);
+    DEBUG32F(36, ffVar * 1e6f);
+
+    DEBUG32F(37, hsvtCovar * 1e9f);
+    DEBUG32F(38, cxffCovar * 1e9f);
+
+    DEBUG32F(39, ccValue * 1e3f);
+    DEBUG32F(40, csValue * 1e6f);
+    DEBUG32F(41, cfValue * 1e6f);
+
+    DEBUG32F(42, csEstimate * 1e6f);
+    DEBUG32F(43, cfEstimate * 1e6f);
+#endif
+
     DEBUG_SET(DEBUG_GOVERNOR,  0, govSetpointLimited);
     DEBUG_SET(DEBUG_GOVERNOR,  1, govHeadSpeed);
     DEBUG_SET(DEBUG_GOVERNOR,  2, govPidSum * 1000.0f);
