@@ -1288,9 +1288,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
             if ((calculateThrottlePercentAbs() > 15) || (!ARMING_FLAG(ARMED))) {
                 // if disarmed, show the user what they will get regardless of throttle value
-                // HF3D TODO:  Negative because of clockwise main rotor spin direction -> CCW body torque on helicopter
-                //   Implement a configuration parameter for rotor rotation direction
-                pidData[FD_YAW].F -= tailTotalFF;
+                // CW main rotor causes CCW body torque => negative correction
+                if (motorConfig()->mainRotorDir == DIR_CW)
+                    pidData[FD_YAW].F -= tailTotalFF;
+                else
+                    pidData[FD_YAW].F += tailTotalFF;
             }
         }
 

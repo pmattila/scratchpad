@@ -130,6 +130,7 @@ typedef enum {
     TABLE_OSD_LOGO_ON_ARMING,
 #endif
     TABLE_GOVERNOR_MODE,
+    TABLE_ROTATION_DIR,
 
     LOOKUP_TABLE_COUNT
 } lookupTableIndex_e;
