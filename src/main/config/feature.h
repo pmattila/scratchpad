@@ -34,7 +34,7 @@ typedef enum {
     FEATURE_UNUSED_1               = BIT(1),
     FEATURE_INFLIGHT_ACC_CAL       = BIT(2),
     FEATURE_RX_SERIAL              = BIT(3),
-    FEATURE_MOTOR_STOP             = BIT(4),
+    FEATURE_UNUSED_4               = BIT(4),
     FEATURE_UNUSED_5               = BIT(5),
     FEATURE_SOFTSERIAL             = BIT(6),
     FEATURE_GPS                    = BIT(7),
@@ -65,6 +65,7 @@ typedef enum {
 
 #define UNUSED_FEATURES ( \
     FEATURE_UNUSED_1  | \
+    FEATURE_UNUSED_4  | \
     FEATURE_UNUSED_5  | \
     FEATURE_UNUSED_8  | \
     FEATURE_UNUSED_11 | \
