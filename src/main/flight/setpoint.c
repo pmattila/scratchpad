@@ -215,6 +215,6 @@ FAST_CODE_NOINLINE float applyFfLimit(int axis, float value, float Kp, float cur
 
 bool shouldApplyFfLimits(int axis)
 {
-    return ffMaxRateLimit[axis] != 0.0f && axis < FD_YAW;
+    return (ffMaxRateLimit[axis] != 0.0f) && (axis == FD_YAW);
 }
 #endif
