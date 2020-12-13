@@ -34,7 +34,7 @@ RAM_BASED ?= no
 CUSTOM_DEFAULTS_EXTENDED ?= no
 
 # generate image that erases config
-FLASH_CONFIG_ERASE ?= no
+FLASH_CONFIG_ERASE ?= yes
 
 # Debugger optons:
 #   empty           - ordinary build with all optimizations enabled
