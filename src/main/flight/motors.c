@@ -201,7 +201,7 @@ void rpmSourceInit(void)
 
 void motorInit(void)
 {
-    motorCount = mixerGetActiveMotors();
+    motorCount = constrain(mixerGetActiveMotors(), 1, MAX_SUPPORTED_MOTORS);
 
     motorDevInit(&motorConfig()->dev, motorCount);
 }
