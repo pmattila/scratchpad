@@ -24,6 +24,9 @@ Please see the "Actions" tab on this Github repo to download the latest build sn
 
 Please note that build snapshots are available for beta-testing, and are otherwise _not_ supported.
 
+## WARNING! Rotorflight snapshot images WILL erase your configuration. Please restore your config from a backup file after flashing.
+
+
 
 # Betaflight Information
 
