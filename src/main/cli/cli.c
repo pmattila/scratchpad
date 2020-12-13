@@ -108,6 +108,7 @@ bool cliMode = false;
 #include "flight/pid.h"
 #include "flight/position.h"
 #include "flight/servos.h"
+#include "flight/motors.h"
 
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/beeper.h"
@@ -265,7 +266,7 @@ static const char * const featureNames[] = {
     [17] = "DISPLAY",
     [18] = "OSD",
     [19] = "",
-    [20] = "CHANNEL_FORWARDING",
+    [20] = "",
     [21] = "",
     [22] = "",
     [23] = "",
@@ -277,6 +278,61 @@ static const char * const featureNames[] = {
     [29] = "DYNAMIC_FILTER",
     [30] = "RPM_FILTER",
     [31] = NULL
+};
+
+
+// Mixer operation names
+static const char * const mixerOpNames[] = {
+    [MIXER_OP_NUL]     = "-",
+    [MIXER_OP_SET]     = "set",
+    [MIXER_OP_ADD]     = "add",
+    [MIXER_OP_MUL]     = "mul",
+};
+
+// Mixer input names
+static const char * const mixerInputNames[] = {
+    [MIXER_IN_NONE]                  = "-",
+    [MIXER_IN_GOVERNOR_MAIN]         = "GM",
+    [MIXER_IN_GOVERNOR_TAIL]         = "GT",
+    [MIXER_IN_STABILIZED_ROLL]       = "SR",
+    [MIXER_IN_STABILIZED_PITCH]      = "SP",
+    [MIXER_IN_STABILIZED_YAW]        = "SY",
+    [MIXER_IN_STABILIZED_COLLECTIVE] = "SC",
+    [MIXER_IN_RC_COMMAND_ROLL]       = "CR",
+    [MIXER_IN_RC_COMMAND_PITCH]      = "CP",
+    [MIXER_IN_RC_COMMAND_YAW]        = "CY",
+    [MIXER_IN_RC_COMMAND_COLLECTIVE] = "CC",
+    [MIXER_IN_RC_COMMAND_THROTTLE]   = "CT",
+    [MIXER_IN_RC_CHANNEL_1]          = "CH1",
+    [MIXER_IN_RC_CHANNEL_2]          = "CH2",
+    [MIXER_IN_RC_CHANNEL_3]          = "CH3",
+    [MIXER_IN_RC_CHANNEL_4]          = "CH4",
+    [MIXER_IN_RC_CHANNEL_5]          = "CH5",
+    [MIXER_IN_RC_CHANNEL_6]          = "CH6",
+    [MIXER_IN_RC_CHANNEL_7]          = "CH7",
+    [MIXER_IN_RC_CHANNEL_8]          = "CH8",
+    [MIXER_IN_RC_CHANNEL_9]          = "CH9",
+    [MIXER_IN_RC_CHANNEL_10]         = "CH10",
+    [MIXER_IN_RC_CHANNEL_11]         = "CH11",
+    [MIXER_IN_RC_CHANNEL_12]         = "CH12",
+    [MIXER_IN_RC_CHANNEL_13]         = "CH13",
+    [MIXER_IN_RC_CHANNEL_14]         = "CH14",
+    [MIXER_IN_RC_CHANNEL_15]         = "CH15",
+    [MIXER_IN_RC_CHANNEL_16]         = "CH16",
+    [MIXER_IN_RC_CHANNEL_17]         = "CH17",
+    [MIXER_IN_RC_CHANNEL_18]         = "CH18",
+};
+
+#if MAX_SUPPORTED_MOTORS != 4
+#error MAX_SUPPORTED_MOTORS hardcoded to 4 in cli/cli.c
+#endif
+#if MAX_SUPPORTED_SERVOS != 8
+#error MAX_SUPPORTED_SERVOS hardcoded to 8 in cli/cli.c
+#endif
+
+// Mixer output names (1 + 8 + 4)
+static const char * const mixerOutputNames[] = {
+    "-", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "M1", "M2", "M3", "M4"
 };
 
 // sync this with rxFailsafeChannelMode_e
@@ -1744,94 +1800,6 @@ static void cliAdjustmentRange(const char *cmdName, char *cmdline)
     }
 }
 
-static void printMotorMix(dumpFlags_t dumpMask, const motorMixer_t *customMotorMixer, const motorMixer_t *defaultCustomMotorMixer, const char *headingStr)
-{
-    const char *format = "mmix %d %s %s %s %s";
-    char buf0[FTOA_BUFFER_LENGTH];
-    char buf1[FTOA_BUFFER_LENGTH];
-    char buf2[FTOA_BUFFER_LENGTH];
-    char buf3[FTOA_BUFFER_LENGTH];
-    for (uint32_t i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        if (customMotorMixer[i].throttle == 0.0f)
-            break;
-        const float thr = customMotorMixer[i].throttle;
-        const float roll = customMotorMixer[i].roll;
-        const float pitch = customMotorMixer[i].pitch;
-        const float yaw = customMotorMixer[i].yaw;
-        bool equalsDefault = false;
-        if (defaultCustomMotorMixer) {
-            const float thrDefault = defaultCustomMotorMixer[i].throttle;
-            const float rollDefault = defaultCustomMotorMixer[i].roll;
-            const float pitchDefault = defaultCustomMotorMixer[i].pitch;
-            const float yawDefault = defaultCustomMotorMixer[i].yaw;
-            const bool equalsDefault = thr == thrDefault && roll == rollDefault && pitch == pitchDefault && yaw == yawDefault;
-
-            headingStr = cliPrintSectionHeading(dumpMask, !equalsDefault, headingStr);
-            cliDefaultPrintLinef(dumpMask, equalsDefault, format,
-                i,
-                ftoa(thrDefault, buf0),
-                ftoa(rollDefault, buf1),
-                ftoa(pitchDefault, buf2),
-                ftoa(yawDefault, buf3));
-        }
-        cliDumpPrintLinef(dumpMask, equalsDefault, format,
-            i,
-            ftoa(thr, buf0),
-            ftoa(roll, buf1),
-            ftoa(pitch, buf2),
-            ftoa(yaw, buf3));
-    }
-}
-
-static void cliMotorMix(const char *cmdName, char *cmdline)
-{
-    int check = 0;
-    const char *ptr;
-
-    if (isEmpty(cmdline)) {
-        printMotorMix(DUMP_MASTER, customMotorMixer(0), NULL, NULL);
-    } else if (strncasecmp(cmdline, "reset", 5) == 0) {
-        for (uint32_t i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-            customMotorMixerMutable(i)->throttle = 0.0f;
-            customMotorMixerMutable(i)->pitch = 0.0f;
-            customMotorMixerMutable(i)->roll = 0.0f;
-            customMotorMixerMutable(i)->yaw = 0.0f;
-        }
-    } else {
-        ptr = cmdline;
-        uint32_t i = atoi(ptr); // get motor number
-        if (i < MAX_SUPPORTED_MOTORS) {
-            ptr = nextArg(ptr);
-            if (ptr) {
-                customMotorMixerMutable(i)->throttle = fastA2F(ptr);
-                check++;
-            }
-            ptr = nextArg(ptr);
-            if (ptr) {
-                customMotorMixerMutable(i)->roll = fastA2F(ptr);
-                check++;
-            }
-            ptr = nextArg(ptr);
-            if (ptr) {
-                customMotorMixerMutable(i)->pitch = fastA2F(ptr);
-                check++;
-            }
-            ptr = nextArg(ptr);
-            if (ptr) {
-                customMotorMixerMutable(i)->yaw = fastA2F(ptr);
-                check++;
-            }
-            if (check != 4) {
-                cliShowInvalidArgumentCountError(cmdName);
-            } else {
-                printMotorMix(DUMP_MASTER, customMotorMixer(0), NULL, NULL);
-            }
-        } else {
-            cliShowArgumentRangeError(cmdName, "INDEX", 0, MAX_SUPPORTED_MOTORS - 1);
-        }
-    }
-}
-
 static void printRxRange(dumpFlags_t dumpMask, const rxChannelRangeConfig_t *channelRangeConfigs, const rxChannelRangeConfig_t *defaultChannelRangeConfigs, const char *headingStr)
 {
     const char *format = "rxrange %u %u %u";
@@ -2069,7 +2037,7 @@ static void cliModeColor(const char *cmdName, char *cmdline)
 static void printServo(dumpFlags_t dumpMask, const servoParam_t *servoParams, const servoParam_t *defaultServoParams, const char *headingStr)
 {
     // print out servo settings
-    const char *format = "servo %u %d %d %d %d %d";
+    const char *format = "servo %u %d %d %d %d %d %d";
     headingStr = cliPrintSectionHeading(dumpMask, false, headingStr);
     for (uint32_t i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         const servoParam_t *servoConf = &servoParams[i];
@@ -2079,270 +2047,518 @@ static void printServo(dumpFlags_t dumpMask, const servoParam_t *servoParams, co
             equalsDefault = !memcmp(servoConf, defaultServoConf, sizeof(*servoConf));
             headingStr = cliPrintSectionHeading(dumpMask, !equalsDefault, headingStr);
             cliDefaultPrintLinef(dumpMask, equalsDefault, format,
-                i,
+                i + 1,
                 defaultServoConf->min,
                 defaultServoConf->max,
-                defaultServoConf->middle,
+                defaultServoConf->mid,
+                defaultServoConf->trim,
                 defaultServoConf->rate,
-                defaultServoConf->forwardFromChannel
+                defaultServoConf->speed
             );
         }
         cliDumpPrintLinef(dumpMask, equalsDefault, format,
-            i,
+            i + 1,
             servoConf->min,
             servoConf->max,
-            servoConf->middle,
+            servoConf->mid,
+            servoConf->trim,
             servoConf->rate,
-            servoConf->forwardFromChannel
+            servoConf->speed
         );
-    }
-    // print servo directions
-    for (uint32_t i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
-        const char *format = "smix reverse %d %d r";
-        const servoParam_t *servoConf = &servoParams[i];
-        const servoParam_t *servoConfDefault = &defaultServoParams[i];
-        if (defaultServoParams) {
-            bool equalsDefault = servoConf->reversedSources == servoConfDefault->reversedSources;
-            for (uint32_t channel = 0; channel < INPUT_SOURCE_COUNT; channel++) {
-                equalsDefault = ~(servoConf->reversedSources ^ servoConfDefault->reversedSources) & (1 << channel);
-                if (servoConfDefault->reversedSources & (1 << channel)) {
-                    cliDefaultPrintLinef(dumpMask, equalsDefault, format, i , channel);
-                }
-                if (servoConf->reversedSources & (1 << channel)) {
-                    cliDumpPrintLinef(dumpMask, equalsDefault, format, i , channel);
-                }
-            }
-        } else {
-            for (uint32_t channel = 0; channel < INPUT_SOURCE_COUNT; channel++) {
-                if (servoConf->reversedSources & (1 << channel)) {
-                    cliDumpPrintLinef(dumpMask, true, format, i , channel);
-                }
-            }
-        }
     }
 }
 
 static void cliServo(const char *cmdName, char *cmdline)
 {
-    const char *format = "servo %u %d %d %d %d %d";
-    enum { SERVO_ARGUMENT_COUNT = 6 };
-    int16_t arguments[SERVO_ARGUMENT_COUNT];
+    enum { FUNC=0, ARGS_MAX=7 };
+    char *args[ARGS_MAX];
+    char *saveptr, *ptr;
+    int count = 0;
 
-    servoParam_t *servo;
+    ptr = strtok_r(cmdline, " ", &saveptr);
+    while (ptr && count < ARGS_MAX) {
+        args[count++] = ptr;
+        ptr = strtok_r(NULL, " ", &saveptr);
+    }
 
-    int i;
-    char *ptr;
-
-    if (isEmpty(cmdline)) {
+    if (count == 0) {
         printServo(DUMP_MASTER, servoParams(0), NULL, NULL);
-    } else {
-        int validArgumentCount = 0;
-
-        ptr = cmdline;
-
-        // Command line is integers (possibly negative) separated by spaces, no other characters allowed.
-
-        // If command line doesn't fit the format, don't modify the config
-        while (*ptr) {
-            if (*ptr == '-' || (*ptr >= '0' && *ptr <= '9')) {
-                if (validArgumentCount >= SERVO_ARGUMENT_COUNT) {
-                    cliShowInvalidArgumentCountError(cmdName);
+    }
+    else if (strcasecmp(args[FUNC], "status") == 0) {
+        for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+            if (getServoOverride(i) == SERVO_OVERRIDE_OFF)
+                cliPrintLinef("servo %d: %d", i+1, lrintf(getServoOutput(i)));
+            else
+                cliPrintLinef("servo %d: %d [override]", i+1, lrintf(getServoOverride(i)));
+        }
+    }
+    else if (strcasecmp(args[FUNC], "override") == 0) {
+        if (count == 1) {
+            for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+                if (getServoOverride(i) == SERVO_OVERRIDE_OFF)
+                    cliPrintLinef("servo override %d off", i+1);
+                else
+                    cliPrintLinef("servo override %d %d", i+1, lrintf(getServoOverride(i)));
+            }
+        }
+        else if (count == 2) {
+            enum { FUNC=0, VALUE };
+            int value;
+            if (strcasecmp(args[VALUE], "off") == 0) {
+                value = SERVO_OVERRIDE_OFF;
+            }
+            else {
+                value = atoi(args[VALUE]);
+                if (value < SERVO_OVERRIDE_MIN || value > SERVO_OVERRIDE_MAX) {
+                    cliShowArgumentRangeError(cmdName, NULL, 0, 0);
                     return;
                 }
-
-                arguments[validArgumentCount++] = atoi(ptr);
-
-                do {
-                    ptr++;
-                } while (*ptr >= '0' && *ptr <= '9');
-            } else if (*ptr == ' ') {
-                ptr++;
-            } else {
-                cliShowParseError(cmdName);
+            }
+            for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+                setServoOverride(i,value);
+                cliPrintLinef("servo override %d %d", i+1, value);
+            }
+        }
+        else if (count == 3) {
+            enum { FUNC=0, INDEX, VALUE };
+            int index, value;
+            if (strcasecmp(args[INDEX], "all") == 0)
+                index = 0;
+            else
+                index = atoi(args[INDEX]);
+            if (strcasecmp(args[VALUE], "off") == 0)
+                value = SERVO_OVERRIDE_OFF;
+            else
+                value = atoi(args[VALUE]);
+            if (index < 0 || index > MAX_SUPPORTED_SERVOS) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
                 return;
             }
+            if ((value < SERVO_OVERRIDE_MIN || value > SERVO_OVERRIDE_MAX) && value != SERVO_OVERRIDE_OFF) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            if (index == 0) {
+                for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+                    setServoOverride(i,value);
+                    cliPrintLinef("servo override %d %d", i+1, value);
+                }
+
+            } else {
+                setServoOverride(index - 1, value);
+                cliPrintLinef("servo override %d %d", index, value);
+            }
         }
-
-        enum {INDEX = 0, MIN, MAX, MIDDLE, RATE, FORWARD};
-
-        i = arguments[INDEX];
-
-        // Check we got the right number of args and the servo index is correct (don't validate the other values)
-        if (validArgumentCount != SERVO_ARGUMENT_COUNT || i < 0 || i >= MAX_SUPPORTED_SERVOS) {
+        else {
             cliShowInvalidArgumentCountError(cmdName);
-            return;
         }
-
-        servo = servoParamsMutable(i);
-
-        if (
-            arguments[MIN] < PWM_PULSE_MIN || arguments[MIN] > PWM_PULSE_MAX ||
-            arguments[MAX] < PWM_PULSE_MIN || arguments[MAX] > PWM_PULSE_MAX ||
-            arguments[MIDDLE] < arguments[MIN] || arguments[MIDDLE] > arguments[MAX] ||
-            arguments[MIN] > arguments[MAX] || arguments[MAX] < arguments[MIN] ||
-            arguments[RATE] < -100 || arguments[RATE] > 100 ||
-            arguments[FORWARD] >= MAX_SUPPORTED_RC_CHANNEL_COUNT
-        ) {
+    }
+    else if (strcasecmp(args[FUNC], "trim") == 0) {
+        if (count == 1) {
+            for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+                cliPrintLinef("servo trim %d %d", i+1, servoParams(i)->trim);
+            }
+        }
+        else if (count == 3) {
+            enum { FUNC=0, INDEX, VALUE };
+            int index, value;
+            index = atoi(args[INDEX]);
+            value = atoi(args[VALUE]);
+            if (index < 1 || index > MAX_SUPPORTED_SERVOS ||
+                value < -250 || value > 250) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            servoParamsMutable(index-1)->trim = value;
+            cliPrintLinef("servo trim %d %d", index, servoParams(index-1)->trim);
+        }
+        else {
+            cliShowInvalidArgumentCountError(cmdName);
+        }
+    }
+    else if (strcasecmp(args[FUNC], "reverse") == 0) {
+        if (count == 1) {
+            for (int i=0; i<MAX_SUPPORTED_SERVOS; i++) {
+                if (servoParams(i)->rate >= 0)
+                    cliPrintLinef("servo %d: normal", i+1);
+                else
+                    cliPrintLinef("servo %d: reversed", i+1);
+            }
+        }
+        else if (count == 2) {
+            enum { FUNC=0, INDEX };
+            int index;
+            index = atoi(args[INDEX]);
+            if (index < 1 || index > MAX_SUPPORTED_SERVOS) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            servoParamsMutable(index-1)->rate *= -1;
+            servoParamsMutable(index-1)->trim *= -1;
+            if (servoParams(index-1)->rate >= 0)
+                cliPrintLinef("servo %d: normal", index);
+            else
+                cliPrintLinef("servo %d: reversed", index);
+        }
+        else {
+            cliShowInvalidArgumentCountError(cmdName);
+        }
+    }
+    else if (count == 7) {
+        const char *format = "servo %d %d %d %d %d %d %d";
+        enum { INDEX = 0, MIN, MAX, MID, TRIM, RATE, SPEED, ARGS_COUNT };
+        int vals[ARGS_COUNT];
+        for (int i=0; i<ARGS_COUNT; i++)
+            vals[i] = atoi(args[i]);
+        if (vals[INDEX] < 1 || vals[INDEX] > MAX_SUPPORTED_SERVOS ||
+            vals[MIN] < PWM_SERVO_PULSE_MIN || vals[MIN] > PWM_SERVO_PULSE_MAX ||
+            vals[MAX] < PWM_SERVO_PULSE_MIN || vals[MAX] > PWM_SERVO_PULSE_MAX ||
+            vals[MIN] > vals[MAX] || vals[MID] < vals[MIN] || vals[MID] > vals[MAX] ||
+            vals[TRIM] < -250 || vals[TRIM] > 250 ||
+            vals[RATE] < -2000 || vals[RATE] > 2000 ||
+            vals[SPEED] < 0 || vals[SPEED] > 10000) {
             cliShowArgumentRangeError(cmdName, NULL, 0, 0);
             return;
         }
-
-        servo->min = arguments[MIN];
-        servo->max = arguments[MAX];
-        servo->middle = arguments[MIDDLE];
-        servo->rate = arguments[RATE];
-        servo->forwardFromChannel = arguments[FORWARD];
-
-        cliDumpPrintLinef(0, false, format,
-            i,
+        int index = vals[INDEX] - 1;
+        servoParam_t *servo = servoParamsMutable(index);
+        servo->min = vals[MIN];
+        servo->max = vals[MAX];
+        servo->mid = vals[MID];
+        servo->trim = vals[TRIM];
+        servo->rate = vals[RATE];
+        servo->speed = vals[SPEED];
+        cliPrintLinef(format,
+            index + 1,
             servo->min,
             servo->max,
-            servo->middle,
+            servo->mid,
+            servo->trim,
             servo->rate,
-            servo->forwardFromChannel
+            servo->speed
         );
-
+    }
+    else {
+        cliShowParseError(cmdName);
     }
 }
 #endif
 
-#ifdef USE_SERVOS
-static void printServoMix(dumpFlags_t dumpMask, const servoMixer_t *customServoMixers, const servoMixer_t *defaultCustomServoMixers, const char *headingStr)
+static const char flightModeMapLetters[32] = {
+    [ANGLE_MODE_BIT          ]  = 'A',
+    [HORIZON_MODE_BIT        ]  = 'H',
+    [PASSTHRU_MODE_BIT       ]  = 'P',
+    [FAILSAFE_MODE_BIT       ]  = 'F',
+    [GPS_RESCUE_MODE_BIT     ]  = 'G',
+
+    [ANGLE_MODE_BIT      + 16]  = 'a',
+    [HORIZON_MODE_BIT    + 16]  = 'h',
+    [PASSTHRU_MODE_BIT   + 16]  = 'p',
+    [FAILSAFE_MODE_BIT   + 16]  = 'f',
+    [GPS_RESCUE_MODE_BIT + 16]  = 'g',
+};
+
+static uint32_t parseModeMap(const char *str)
 {
-    const char *format = "smix %d %d %d %d %d %d %d %d";
-    headingStr = cliPrintSectionHeading(dumpMask, false, headingStr);
-    for (uint32_t i = 0; i < MAX_SERVO_RULES; i++) {
-        const servoMixer_t customServoMixer = customServoMixers[i];
-        if (customServoMixer.rate == 0) {
-            break;
+    uint32_t map;
+
+    for (map=0; str && *str; str++) {
+        for (unsigned i=0; i<32; i++) {
+            if (flightModeMapLetters[i] == *str) {
+                map |= BIT(i);
+                break;
+            }
         }
+    }
 
-        bool equalsDefault = false;
-        if (defaultCustomServoMixers) {
-            servoMixer_t customServoMixerDefault = defaultCustomServoMixers[i];
-            equalsDefault = !memcmp(&customServoMixer, &customServoMixerDefault, sizeof(customServoMixer));
+    return map;
+}
 
-            headingStr = cliPrintSectionHeading(dumpMask, !equalsDefault, headingStr);
-            cliDefaultPrintLinef(dumpMask, equalsDefault, format,
-                i,
-                customServoMixerDefault.targetChannel,
-                customServoMixerDefault.inputSource,
-                customServoMixerDefault.rate,
-                customServoMixerDefault.speed,
-                customServoMixerDefault.min,
-                customServoMixerDefault.max,
-                customServoMixerDefault.box
+static const char * printModeMap(uint32_t map, char *buf)
+{
+    char *ptr = buf;
+
+    for (unsigned i=0; i<32; i++) {
+        if ((map & BIT(i)) && flightModeMapLetters[i])
+            *ptr++ = flightModeMapLetters[i];
+    }
+    *ptr = 0;
+
+    return buf;
+}
+
+static void printMixerRules(dumpFlags_t dumpMask, const mixerRule_t *rules, const mixerRule_t *defaults, const char *headingStr)
+{
+    const char *format = "mixer rule %u %s %s %s %d %d %d %d %s";
+    bool equalsDefault = false;
+    char buf[34];
+
+    if (defaults) {
+        equalsDefault = !memcmp(rules, defaults, sizeof(mixerRule_t)*MIXER_RULE_COUNT);
+        if ((dumpMask & DO_DIFF) && !(dumpMask & SHOW_DEFAULTS) && equalsDefault)
+            return;
+    }
+    if (headingStr) {
+        cliPrintHashLine(headingStr);
+    }
+    for (unsigned i = 0; i < MIXER_RULE_COUNT; i++) {
+        const mixerRule_t *rule = &rules[i];
+        if (defaults) {
+            const mixerRule_t *def = &defaults[i];
+            equalsDefault = !memcmp(rule, def, sizeof(mixerRule_t));
+            cliDefaultPrintLinef(dumpMask, equalsDefault, format, i,
+                                 mixerOpNames[def->oper],
+                                 mixerInputNames[def->input],
+                                 mixerOutputNames[def->output],
+                                 def->rate,
+                                 def->offset,
+                                 def->min,
+                                 def->max,
+                                 printModeMap(def->mode, buf)
             );
         }
-        cliDumpPrintLinef(dumpMask, equalsDefault, format,
-            i,
-            customServoMixer.targetChannel,
-            customServoMixer.inputSource,
-            customServoMixer.rate,
-            customServoMixer.speed,
-            customServoMixer.min,
-            customServoMixer.max,
-            customServoMixer.box
-        );
+        if (rule->oper) {
+            cliDumpPrintLinef(dumpMask, equalsDefault, format, i,
+                              mixerOpNames[rule->oper],
+                              mixerInputNames[rule->input],
+                              mixerOutputNames[rule->output],
+                              rule->rate,
+                              rule->offset,
+                              rule->min,
+                              rule->max,
+                              printModeMap(rule->mode, buf)
+            );
+        }
     }
 }
 
-static void cliServoMix(const char *cmdName, char *cmdline)
+static void printMixerInputs(dumpFlags_t dumpMask, const mixerInput_t *inputs, const mixerInput_t *defaults, const char *headingStr)
 {
-    int args[8], check = 0;
-    int len = strlen(cmdline);
+    const char *format = "mixer input %s %d %d %d %d";
+    bool equalsDefault = false;
 
-    if (len == 0) {
-        printServoMix(DUMP_MASTER, customServoMixers(0), NULL, NULL);
-    } else if (strncasecmp(cmdline, "reset", 5) == 0) {
-        // erase custom mixer
-        memset(customServoMixers_array(), 0, sizeof(*customServoMixers_array()));
-        for (uint32_t i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
-            servoParamsMutable(i)->reversedSources = 0;
-        }
-    } else if (strncasecmp(cmdline, "reverse", 7) == 0) {
-        enum {SERVO = 0, INPUT, REVERSE, ARGS_COUNT};
-        char *ptr = strchr(cmdline, ' ');
-
-        if (ptr == NULL) {
-            cliPrintf("s");
-            for (uint32_t inputSource = 0; inputSource < INPUT_SOURCE_COUNT; inputSource++)
-                cliPrintf("\ti%d", inputSource);
-            cliPrintLinefeed();
-
-            for (uint32_t servoIndex = 0; servoIndex < MAX_SUPPORTED_SERVOS; servoIndex++) {
-                cliPrintf("%d", servoIndex);
-                for (uint32_t inputSource = 0; inputSource < INPUT_SOURCE_COUNT; inputSource++) {
-                    cliPrintf("\t%s  ", (servoParams(servoIndex)->reversedSources & (1 << inputSource)) ? "r" : "n");
-                }
-                cliPrintLinefeed();
-            }
+    if (defaults) {
+        equalsDefault = !memcmp(inputs, defaults, sizeof(mixerInput_t)*MIXER_INPUT_COUNT);
+        if ((dumpMask & DO_DIFF) && !(dumpMask & SHOW_DEFAULTS) && equalsDefault)
             return;
+    }
+    if (headingStr) {
+        cliPrintHashLine(headingStr);
+    }
+    for (unsigned i = 1; i < MIXER_IN_COUNT; i++) {
+        const mixerInput_t *input = &inputs[i];
+        if (defaults) {
+            const mixerInput_t *def = &defaults[i];
+            equalsDefault = !memcmp(input, def, sizeof(mixerInput_t));
+            cliDefaultPrintLinef(dumpMask, equalsDefault, format,
+                                 mixerInputNames[i],
+                                 def->rate,
+                                 def->offset,
+                                 def->min,
+                                 def->max
+            );
         }
-
-        char *saveptr;
-        ptr = strtok_r(ptr, " ", &saveptr);
-        while (ptr != NULL && check < ARGS_COUNT - 1) {
-            args[check++] = atoi(ptr);
-            ptr = strtok_r(NULL, " ", &saveptr);
-        }
-
-        if (ptr == NULL || check != ARGS_COUNT - 1) {
-            cliShowInvalidArgumentCountError(cmdName);
-            return;
-        }
-
-        if (args[SERVO] >= 0 && args[SERVO] < MAX_SUPPORTED_SERVOS
-                && args[INPUT] >= 0 && args[INPUT] < INPUT_SOURCE_COUNT
-                && (*ptr == 'r' || *ptr == 'n')) {
-            if (*ptr == 'r') {
-                servoParamsMutable(args[SERVO])->reversedSources |= 1 << args[INPUT];
-            } else {
-                servoParamsMutable(args[SERVO])->reversedSources &= ~(1 << args[INPUT]);
-            }
-        } else {
-            cliShowArgumentRangeError(cmdName, "servo", 0, MAX_SUPPORTED_SERVOS);
-            return;
-        }
-
-        cliServoMix(cmdName, "reverse");
-    } else {
-        enum {RULE = 0, TARGET, INPUT, RATE, SPEED, MIN, MAX, BOX, ARGS_COUNT};
-        char *saveptr;
-        char *ptr = strtok_r(cmdline, " ", &saveptr);
-        while (ptr != NULL && check < ARGS_COUNT) {
-            args[check++] = atoi(ptr);
-            ptr = strtok_r(NULL, " ", &saveptr);
-        }
-
-        if (ptr != NULL || check != ARGS_COUNT) {
-            cliShowInvalidArgumentCountError(cmdName);
-            return;
-        }
-
-        int32_t i = args[RULE];
-        if (i >= 0 && i < MAX_SERVO_RULES &&
-            args[TARGET] >= 0 && args[TARGET] < MAX_SUPPORTED_SERVOS &&
-            args[INPUT] >= 0 && args[INPUT] < INPUT_SOURCE_COUNT &&
-            args[RATE] >= -100 && args[RATE] <= 100 &&
-            args[SPEED] >= 0 && args[SPEED] <= MAX_SERVO_SPEED &&
-            args[MIN] >= 0 && args[MIN] <= 100 &&
-            args[MAX] >= 0 && args[MAX] <= 100 && args[MIN] < args[MAX] &&
-            args[BOX] >= 0 && args[BOX] <= MAX_SERVO_BOXES) {
-            customServoMixersMutable(i)->targetChannel = args[TARGET];
-            customServoMixersMutable(i)->inputSource = args[INPUT];
-            customServoMixersMutable(i)->rate = args[RATE];
-            customServoMixersMutable(i)->speed = args[SPEED];
-            customServoMixersMutable(i)->min = args[MIN];
-            customServoMixersMutable(i)->max = args[MAX];
-            customServoMixersMutable(i)->box = args[BOX];
-            cliServoMix(cmdName, "");
-        } else {
-            cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+        if (input->rate) {
+            cliDumpPrintLinef(dumpMask, equalsDefault, format,
+                              mixerInputNames[i],
+                              input->rate,
+                              input->offset,
+                              input->min,
+                              input->max
+            );
         }
     }
 }
-#endif
+
+static void cliMixer(const char *cmdName, char *cmdline)
+{
+    enum { FUNC=0, ARG1, ARGS_MAX=12 };
+    char *args[ARGS_MAX];
+    char *saveptr, *ptr;
+    int count = 0;
+
+    ptr = strtok_r(cmdline, " ", &saveptr);
+    while (ptr && count < ARGS_MAX) {
+        args[count++] = ptr;
+        ptr = strtok_r(NULL, " ", &saveptr);
+    }
+
+    if (count == 0) {
+        printMixerInputs(DUMP_MASTER, mixerInputs(0), NULL, "mixer input");
+        printMixerRules(DUMP_MASTER, mixerRules(0), NULL, "mixer rule");
+    }
+    // count > 0
+    else if (strcasecmp(args[FUNC], "reset") == 0) {
+        PG_RESET(mixerInputs);
+        PG_RESET(mixerRules);
+    }
+    else if (strcasecmp(args[FUNC], "input") == 0) {
+        if (count == 1) {
+            printMixerInputs(DUMP_MASTER, mixerInputs(0), NULL, NULL);
+        }
+        else if (count == 2) {
+            if (strcasecmp(args[ARG1], "reset") == 0) {
+                PG_RESET(mixerInputs);
+            }
+        }
+        else if (count == 6) {
+            enum { FUNC=0, INPUT, RATE, OFFSET, MIN, MAX, ARGS_COUNT };
+            int vals[ARGS_COUNT];
+            for (int i=1; i<count; i++)
+                vals[i] = atoi(args[i]);
+            for (unsigned i=0; i<ARRAYLEN(mixerInputNames); i++) {
+                if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0)
+                    vals[INPUT] = i;
+            }
+            if (vals[INPUT] > 0 && vals[INPUT] < MIXER_INPUT_COUNT &&
+                vals[RATE] >= MIXER_RATE_MIN && vals[RATE] <= MIXER_RATE_MAX &&
+                vals[OFFSET] >= MIXER_INPUT_MIN && vals[OFFSET] <= MIXER_INPUT_MAX &&
+                vals[MIN] >= MIXER_INPUT_MIN && vals[MIN] <= MIXER_INPUT_MAX &&
+                vals[MAX] >= MIXER_INPUT_MIN && vals[MAX] <= MIXER_INPUT_MAX &&
+                vals[MIN] <= vals[MAX])
+            {
+                int index = vals[INPUT];
+                mixerInput_t *input = mixerInputsMutable(index);
+                input->offset = vals[OFFSET];
+                input->rate = vals[RATE];
+                input->min = vals[MIN];
+                input->max = vals[MAX];
+            } else {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            }
+        } else {
+            cliShowInvalidArgumentCountError(cmdName);
+        }
+    }
+    else if (strcasecmp(args[FUNC], "rule") == 0) {
+        if (count == 1) {
+            printMixerRules(DUMP_MASTER, mixerRules(0), NULL, NULL);
+        }
+        else if (count == 2) {
+            if (strcasecmp(args[ARG1], "reset") == 0) {
+                PG_RESET(mixerRules);
+            }
+        }
+        else if (count == 3) {
+            enum { FUNC=0, RULE, OPER, ARGS_COUNT };
+            if (strcasecmp(args[OPER], "del") == 0) {
+                int index = atoi(args[RULE]);
+                if (index >= 0 && index < MIXER_RULE_COUNT) {
+                    memset(mixerRulesMutable(index), 0, sizeof(mixerRule_t));
+                } else {
+                    cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                }
+            }
+        }
+        else if (count == 9 || count == 10) {
+            enum { FUNC=0, RULE, OPER, INPUT, OUTPUT, RATE, OFFSET, MIN, MAX, MODE, ARGS_COUNT };
+            int vals[ARGS_COUNT];
+            for (int i=1; i<count; i++)
+                vals[i] = atoi(args[i]);
+            if (count == 10)
+                vals[MODE] = parseModeMap(args[MODE]);
+            else
+                vals[MODE] = 0;
+            for (unsigned i=0; i<ARRAYLEN(mixerOpNames); i++) {
+                if (strcasecmp(args[OPER], mixerOpNames[i]) == 0)
+                    vals[OPER] = i;
+            }
+            for (unsigned i=0; i<ARRAYLEN(mixerInputNames); i++) {
+                if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0)
+                    vals[INPUT] = i;
+            }
+            for (unsigned i=0; i<ARRAYLEN(mixerOutputNames); i++) {
+                if (strcasecmp(args[OUTPUT], mixerOutputNames[i]) == 0)
+                    vals[OUTPUT] = i;
+            }
+            if (vals[RULE] >= 0 && vals[RULE] < MIXER_RULE_COUNT &&
+                vals[OPER] >= MIXER_OP_NUL && vals[OPER] < MIXER_OP_COUNT &&
+                vals[INPUT] >= 0 && vals[INPUT] < MIXER_INPUT_COUNT &&
+                vals[OUTPUT] >= 0 && vals[OUTPUT] < MIXER_OUTPUT_COUNT &&
+                vals[OFFSET] >= MIXER_INPUT_MIN && vals[OFFSET] <= MIXER_INPUT_MAX &&
+                vals[RATE] >= MIXER_RATE_MIN && vals[RATE] <= MIXER_RATE_MAX &&
+                vals[MIN] >= MIXER_INPUT_MIN && vals[MIN] <= MIXER_INPUT_MAX &&
+                vals[MAX] >= MIXER_INPUT_MIN && vals[MAX] <= MIXER_INPUT_MAX &&
+                vals[MIN] <= vals[MAX])
+            {
+                int index = vals[RULE];
+                mixerRule_t *mix = mixerRulesMutable(index);
+                mix->oper   = vals[OPER];
+                mix->input  = vals[INPUT];
+                mix->output = vals[OUTPUT];
+                mix->rate   = vals[RATE];
+                mix->offset = vals[OFFSET];
+                mix->min    = vals[MIN];
+                mix->max    = vals[MAX];
+                mix->mode   = vals[MODE];
+            } else {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+            }
+        } else {
+            cliShowInvalidArgumentCountError(cmdName);
+        }
+    }
+    else if (strcasecmp(args[FUNC], "override") == 0) {
+        if (count == 1) {
+            for (int i=1; i<MIXER_INPUT_COUNT; i++) {
+                if (mixerGetOverride(i) == MIXER_OVERRIDE_OFF)
+                    cliPrintLinef("mixer override %s off", mixerInputNames[i]);
+                else
+                    cliPrintLinef("mixer override %s %d", mixerInputNames[i], mixerGetOverride(i));
+            }
+        }
+        else if (count == 2) {
+            enum { FUNC=0, VALUE };
+            int value;
+            if (strcasecmp(args[VALUE], "off") == 0)
+                value = MIXER_OVERRIDE_OFF;
+            else
+                value = atoi(args[VALUE]);
+            if (value < MIXER_OVERRIDE_MIN || value > MIXER_OVERRIDE_OFF) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            for (int i = 0; i < MIXER_INPUT_COUNT; i++) {
+                mixerSetOverride(i, value);
+            }
+        }
+        else if (count == 3) {
+            enum { FUNC=0, INPUT, VALUE };
+            int index, value;
+            if (strcasecmp(args[INPUT], "all") == 0) {
+                index = MIXER_IN_NONE;
+            } else {
+                index = atoi(args[INPUT]);
+                for (unsigned i = 1; i < ARRAYLEN(mixerInputNames); i++) {
+                    if (strcasecmp(args[INPUT], mixerInputNames[i]) == 0) {
+                        index = i;
+                    }
+                }
+            }
+            if (strcasecmp(args[VALUE], "off") == 0)
+                value = MIXER_OVERRIDE_OFF;
+            else
+                value = atoi(args[VALUE]);
+            if (index < MIXER_IN_NONE || index >= MIXER_IN_COUNT ||
+                value < MIXER_OVERRIDE_MIN || value > MIXER_OVERRIDE_OFF) {
+                cliShowArgumentRangeError(cmdName, NULL, 0, 0);
+                return;
+            }
+            if (index == MIXER_IN_NONE) {
+                for (int i = 0; i < MIXER_INPUT_COUNT; i++)
+                    mixerSetOverride(i, value);
+            } else {
+                mixerSetOverride(index, value);
+            }
+        } else {
+            cliShowInvalidArgumentCountError(cmdName);
+        }
+    }
+    else {
+        cliShowParseError(cmdName);
+    }
+}
+
 
 #ifdef USE_SDCARD
 
@@ -3542,8 +3758,8 @@ static void cliExit(const char *cmdName, char *cmdline)
     *cliBuffer = '\0';
     bufferIndex = 0;
     cliMode = false;
-    // incase a motor was left running during motortest, clear it here
-    mixerResetDisarmedMotors();
+
+    resetMotorOverride();
     cliReboot();
 }
 
@@ -3955,21 +4171,18 @@ static void cliMotor(const char *cmdName, char *cmdline)
     }
 
     if (index == 2) {
-        if (motorValue < PWM_RANGE_MIN || motorValue > PWM_RANGE_MAX) {
-            cliShowArgumentRangeError(cmdName, "VALUE", 1000, 2000);
+        if (motorValue < 0 || motorValue > 1000) {
+            cliShowArgumentRangeError(cmdName, "VALUE", 0, 1000);
         } else {
-            uint32_t motorOutputValue = 0; // TODO motorValue
-
+            float value = motorValue / 1000.0f;
             if (motorIndex != ALL_MOTORS) {
-                motor_disarmed[motorIndex] = motorOutputValue;
-
-                cliPrintLinef("motor %d: %d", motorIndex, motorOutputValue);
+                setMotorOverride(motorIndex, value);
+                cliPrintLinef("motor %d: %d", motorIndex, motorValue);
             } else  {
                 for (int i = 0; i < getMotorCount(); i++) {
-                    motor_disarmed[i] = motorOutputValue;
+                    setMotorOverride(i, value);
                 }
-
-                cliPrintLinef("all motors: %d", motorOutputValue);
+                cliPrintLinef("all motors: %d", motorValue);
             }
         }
     } else {
@@ -6099,25 +6312,15 @@ static void printConfig(const char *cmdName, char *cmdline, bool doDiff)
 #endif
 
         if (!(dumpMask & HARDWARE_ONLY)) {
-            const char *mixerHeadingStr = "mixer";
-            if (!(dumpMask & DO_DIFF)) {
-                mixerHeadingStr = cliPrintSectionHeading(dumpMask, true, mixerHeadingStr);
-                cliDumpPrintLinef(dumpMask, false, "mmix reset");
-            }
-            printMotorMix(dumpMask, customMotorMixer_CopyArray, customMotorMixer(0), mixerHeadingStr);
+
+            printFeature(dumpMask, featureConfig_Copy.enabledFeatures, featureConfig()->enabledFeatures, "feature");
 
 #ifdef USE_SERVOS
             printServo(dumpMask, servoParams_CopyArray, servoParams(0), "servo");
-
-            const char *servoMixHeadingStr = "servo mixer";
-            if (!(dumpMask & DO_DIFF)) {
-                servoMixHeadingStr = cliPrintSectionHeading(dumpMask, true, servoMixHeadingStr);
-                cliDumpPrintLinef(dumpMask, false, "smix reset");
-            }
-            printServoMix(dumpMask, customServoMixers_CopyArray, customServoMixers(0), servoMixHeadingStr);
 #endif
 
-            printFeature(dumpMask, featureConfig_Copy.enabledFeatures, featureConfig()->enabledFeatures, "feature");
+            printMixerInputs(dumpMask, mixerInputs_CopyArray, mixerInputs(0), "mixer input");
+            printMixerRules(dumpMask, mixerRules_CopyArray, mixerRules(0), "mixer rule");
 
 #if defined(USE_BEEPER)
             printBeeper(dumpMask, beeperConfig_Copy.beeper_off_flags, beeperConfig()->beeper_off_flags, "beeper", BEEPER_ALLOWED_MODES, "beeper");
@@ -6373,7 +6576,15 @@ const clicmd_t cmdTable[] = {
 #endif
     CLI_COMMAND_DEF("map", "configure rc channel order", "[<map>]", cliMap),
     CLI_COMMAND_DEF("mcu_id", "id of the microcontroller", NULL, cliMcuId),
-    CLI_COMMAND_DEF("mmix", "custom motor mixer", NULL, cliMotorMix),
+    CLI_COMMAND_DEF("mixer", "configure mixer",
+                    "input <input> <rate> <min> <max>\r\n"
+                    "\tinput reset\r\n"
+                    "\trule <index> [set|add|mul] <input> <output> <offset> <rate> <min> <max>\r\n"
+                    "\trule <index> [del]\r\n"
+                    "\trule reset\r\n"
+                    "\toverride <input> <value|off>\r\n"
+                    "\toverride <value|off>",
+                    cliMixer),
 #ifdef USE_LED_STRIP_STATUS_MODE
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),
 #endif
@@ -6416,11 +6627,6 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("set", "change setting", "[<name>=<value>]", cliSet),
 #if defined(USE_SIGNATURE)
     CLI_COMMAND_DEF("signature", "get / set the board type signature", "[signature]", cliSignature),
-#endif
-#ifdef USE_SERVOS
-    CLI_COMMAND_DEF("smix", "servo mixer", "<rule> <servo> <source> <rate> <speed> <min> <max> <box>\r\n"
-        "\treset\r\n"
-        "\treverse <servo> <source> r|n", cliServoMix),
 #endif
     CLI_COMMAND_DEF("status", "show status", NULL, cliStatus),
 #if defined(USE_TASK_STATISTICS)
