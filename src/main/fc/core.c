@@ -789,6 +789,7 @@ static FAST_CODE_NOINLINE void subTaskMixerUpdate(timeUs_t currentTimeUs)
         startTime = micros();
     }
 
+    governorUpdate();
     mixerUpdate();
 
 #ifdef USE_SERVOS

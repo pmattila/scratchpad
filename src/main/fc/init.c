@@ -821,6 +821,8 @@ void init(void)
     }
 #endif
 
+    governorInit();
+
 #ifdef USE_USB_DETECT
     usbCableDetectInit();
 #endif
