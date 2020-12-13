@@ -1246,10 +1246,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #endif
 
 #ifdef USE_INTERPOLATED_SP
-            // RTFL:  Only apply feedforward interpolation limits to the Yaw axis since we're using direct feedforward on the roll and pitch axes.
-            if (axis == FD_YAW) {
-                pidData[axis].F = shouldApplyFfLimits(axis) ?
-                    applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint) : feedForward;
+            if (shouldApplyFfLimits(axis)) {
+                pidData[axis].F = applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint);
             }
             else
 #endif
