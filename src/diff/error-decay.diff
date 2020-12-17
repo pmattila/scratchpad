@@ -1,0 +1,84 @@
+commit 402ad0b2258f703801daa50736c3613df9ade653
+Author: Petri Mattila <petri.t.j.mattila@gmail.com>
+Date:   Sun Dec 13 18:45:39 2020 +0000
+
+    RTFL: Add error decay to PID error term
+    
+    Code borrowed from the Heliflight3D commit
+    
+      "HF3D: Add error decay to PID error term"
+
+diff --git a/src/main/cli/settings.c b/src/main/cli/settings.c
+index c80c7da85..2c59073c1 100644
+--- a/src/main/cli/settings.c
++++ b/src/main/cli/settings.c
+@@ -1021,6 +1021,10 @@ const clivalue_t valueTable[] = {
+     { "yaw_cyclic_ff_gain",             VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 1000 },PG_PID_PROFILE, offsetof(pidProfile_t, yawCycKf) },
+     { "yaw_base_thrust",                VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 3000 },PG_PID_PROFILE, offsetof(pidProfile_t, yawBaseThrust) },
+     { "collective_ff_impulse_freq",     VAR_UINT16 | MASTER_VALUE,  .config.minmaxUnsigned = { 0, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, collective_ff_impulse_freq) },
++#ifdef USE_RTFL_ERROR_DECAY
++    { "error_decay_always",             VAR_UINT8  | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_always) },
++    { "error_decay_rate",               VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 45 },PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_rate) },
++#endif
+ 
+ // PG_TELEMETRY_CONFIG
+ #ifdef USE_TELEMETRY
+diff --git a/src/main/flight/pid.c b/src/main/flight/pid.c
+index fd48455af..e810901c9 100644
+--- a/src/main/flight/pid.c
++++ b/src/main/flight/pid.c
+@@ -163,6 +163,8 @@ void resetPidProfile(pidProfile_t *pidProfile)
+         .yawCycKf = 0,
+         .yawBaseThrust = 900,
+         .collective_ff_impulse_freq = 100,
++        .error_decay_always = 0,
++        .error_decay_rate = 7,
+     );
+ }
+ 
+@@ -1062,6 +1064,19 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
+         }
+         pidData[axis].I = constrainf(previousIterm + Ki * dT * itermErrorRate, -itermLimit, itermLimit);
+ 
++#ifdef USE_RTFL_ERROR_DECAY
++        // Decay accumulated error if appropriate
++#define signorzero(x) ((x < 0) ? -1 : (x > 0) ? 1 : 0)
++        if (!isHeliSpooledUp() || pidProfile->error_decay_always) {
++            // Calculate number of degrees to remove from the accumulated error
++            const float decayFactor = pidProfile->error_decay_rate * dT;
++            pidData[axis].I -= signorzero(pidData[axis].I) * decayFactor * Ki;
++#if defined(USE_ABSOLUTE_CONTROL)
++            axisError[axis] -= signorzero(axisError[axis]) * decayFactor;
++#endif
++        }
++#endif
++
+         // -----calculate pidSetpointDelta
+         float pidSetpointDelta = 0;
+ #ifdef USE_INTERPOLATED_SP
+diff --git a/src/main/flight/pid.h b/src/main/flight/pid.h
+index e283cf29d..4d8367f76 100644
+--- a/src/main/flight/pid.h
++++ b/src/main/flight/pid.h
+@@ -145,6 +145,8 @@ typedef struct pidProfile_s {
+     uint16_t yawCycKf;                      // Feedforward for cyclic into Yaw
+     uint16_t yawBaseThrust;                 // Base thrust for the tail
+     uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
++    uint8_t error_decay_always;             // Always decay accumulated I term and Abs Control error?
++    uint8_t error_decay_rate;               // Rate to decay accumulated error in deg/s
+ 
+ } pidProfile_t;
+ 
+diff --git a/src/main/target/common_pre.h b/src/main/target/common_pre.h
+index dba673f84..41e15a5f4 100644
+--- a/src/main/target/common_pre.h
++++ b/src/main/target/common_pre.h
+@@ -206,6 +206,8 @@
+ #define USE_SERIALRX_SPEKTRUM   // SRXL, DSM2 and DSMX protocol
+ #define USE_SERIALRX_SUMD       // Graupner Hott protocol
+ 
++#define USE_RTFL_ERROR_DECAY
++
+ #if (TARGET_FLASH_SIZE > 128)
+ #define PID_PROFILE_COUNT 3
+ #define CONTROL_RATE_PROFILE_COUNT  6
