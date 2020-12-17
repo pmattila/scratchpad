@@ -1,0 +1,238 @@
+commit b018ad401df23f3d2ae137feeb9217be048502bb
+Author: Petri Mattila <petri.t.j.mattila@gmail.com>
+Date:   Sun Dec 13 18:45:40 2020 +0000
+
+    RTFL: Add helicopter rescue mode
+    
+    Use ANGLE_MODE as rescue mode. Ignore stick inputs and keep the
+    helicopter level, while climbing.
+    
+    Code borrowed from the Heliflight3D commit
+    
+      "HF3D: Add helicopter rescue mode"
+
+diff --git a/src/main/cli/settings.c b/src/main/cli/settings.c
+index 2c59073c1..d6d09546e 100644
+--- a/src/main/cli/settings.c
++++ b/src/main/cli/settings.c
+@@ -1025,6 +1025,9 @@ const clivalue_t valueTable[] = {
+     { "error_decay_always",             VAR_UINT8  | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_always) },
+     { "error_decay_rate",               VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 45 },PG_PID_PROFILE, offsetof(pidProfile_t, error_decay_rate) },
+ #endif
++#ifdef USE_RTFL_RESCUE_MODE
++    { "rescue_collective",              VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 50, 500 },PG_PID_PROFILE, offsetof(pidProfile_t, rescue_collective) },
++#endif
+ 
+ // PG_TELEMETRY_CONFIG
+ #ifdef USE_TELEMETRY
+diff --git a/src/main/fc/rc.c b/src/main/fc/rc.c
+index 4325957fa..59c2012e8 100644
+--- a/src/main/fc/rc.c
++++ b/src/main/fc/rc.c
+@@ -695,6 +695,45 @@ FAST_CODE_NOINLINE void updateRcCommands(void)
+     rcCommand[THROTTLE] = constrain(rcData[THROTTLE], PWM_RANGE_MIN, PWM_RANGE_MAX);
+ 
+     rcCommand[COLLECTIVE] = constrain(rcData[COLLECTIVE] - rxConfig()->midrc, -500, 500);
++
++#ifdef USE_RTFL_RESCUE_MODE
++    // RTFL:  Rescue (angle) mode overrides user's collective pitch rcCommand
++    // Check if rescue (angle) mode is active
++    if (FLIGHT_MODE(ANGLE_MODE)) {    // || FLIGHT_MODE(GPS_RESCUE_MODE)
++        // attitude.values.roll/pitch = 0 when level, 1800 when fully inverted (decidegrees)
++        // Pitch is +90 / -90 at straight down and straight up.  Invert the absolute value of that so 0 = straight up/down
++        const float pitchCurrentInclination = 90.0f - (ABS(attitude.values.pitch) / 10.0f);
++        // Roll is +90/-90 when sideways, and +180/-180 when inverted
++        float rollCurrentInclination = 0.0f;
++        if (ABS(attitude.values.roll) > 900.0f) {
++            rollCurrentInclination = 90.0f - (180.0f - (ABS(attitude.values.roll) / 10.0f));
++        } else {
++            rollCurrentInclination = 90.0f - (ABS(attitude.values.roll) / 10.0f);
++        }
++        const float vertCurrentInclination = MIN(pitchCurrentInclination, rollCurrentInclination);
++
++        // adjust collective pitch so heli has no collective while past vertical, and pitch is added as it approaches level
++        // vertCurrentInclination between 0 (vertical) and 90 (level)  -- inverted from normal attitude values
++        // Hover pitch on my M2 test rig is around +100, full pitch pumps are around +240
++        // Desired collective at various rescue pitches:
++        //   90deg = 0 collective, 60deg=25col, 45deg=60col, 30deg=110col, 10deg=190col, 0deg=240col
++        //   ... output of this equation is 240, so normalize it and then multiply by rescue_collective setting.
++        // RTFL TODO:  Add rescue collective agression parameter to reduce tail blowout from large collective swings
++        //   Or just rate limit the collective change?  Basically it's the big load and governor change that can overwhelm
++        //   the tail authority of the heli.
++        // RTFL TODO:  acc angleTrim setting isn't taken into account here... but is in pidLevel.
++        //   Same issue up above.  It's minor as long as angleTrim is small, so maybe not worth the calculation overhead?
++        if ( ((attitude.values.roll / 10.0f) > 90.0f) || ((attitude.values.roll / 10.0f) < -90.0f) ) {
++            // We're closer to inverted and pidLevel will be rolling to inverted.
++            // Use negative collective pitch.
++            rcCommand[COLLECTIVE] = pidGetRescueCollectiveSetting() * (-0.02963f * vertCurrentInclination * vertCurrentInclination) / 240.0f;
++        } else {
++            // We're closer to upright and pidLevel will be rolling to upright.
++            // Use positive collective pitch.
++            rcCommand[COLLECTIVE] = pidGetRescueCollectiveSetting() * (0.02963f * vertCurrentInclination * vertCurrentInclination) / 240.0f;
++        }
++    }
++#endif
+ }
+ 
+ void resetYawAxis(void)
+diff --git a/src/main/flight/pid.c b/src/main/flight/pid.c
+index e810901c9..9b92f314f 100644
+--- a/src/main/flight/pid.c
++++ b/src/main/flight/pid.c
+@@ -165,6 +165,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
+         .collective_ff_impulse_freq = 100,
+         .error_decay_always = 0,
+         .error_decay_rate = 7,
++        .rescue_collective = 200,
+     );
+ }
+ 
+@@ -199,6 +200,10 @@ static FAST_RAM_ZERO_INIT float collectiveDeflectionAbsLPF;
+ static FAST_RAM_ZERO_INIT float collectiveDeflectionAbsHPF;
+ static FAST_RAM_ZERO_INIT float collectivePulseFilterGain;
+ 
++#ifdef USE_RTFL_RESCUE_MODE
++static FAST_RAM_ZERO_INIT float rescueCollective;
++#endif
++
+ static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermNotchApplyFn;
+ static FAST_RAM_ZERO_INIT biquadFilter_t dtermNotch[XYZ_AXIS_COUNT];
+ static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermLowpassApplyFn;
+@@ -574,6 +579,10 @@ void pidInitConfig(const pidProfile_t *pidProfile)
+     ffSmoothFactor = 1.0f - ((float)pidProfile->ff_smooth_factor) / 100.0f;
+     interpolatedSpInit(pidProfile);
+ #endif
++
++#ifdef USE_RTFL_RESCUE_MODE
++    rescueCollective = pidProfile->rescue_collective;
++#endif
+ }
+ 
+ void pidInit(const pidProfile_t *pidProfile)
+@@ -671,22 +680,73 @@ STATIC_UNIT_TESTED float calcHorizonLevelStrength(void)
+ 
+ FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, float currentPidSetpoint)
+ {
+-    // calculate error angle and limit the angle to the max inclination
+-    // rcDeflection is in range [-1.0, 1.0]
+-    float angle = pidProfile->levelAngleLimit * getRcDeflection(axis);
++#ifdef USE_RTFL_RESCUE_MODE
++     if (FLIGHT_MODE(ANGLE_MODE)) {
++        // Angle mode is now rescue mode.
++        float errorAngle = 0.0f;
++
++        // -90 Pitch is straight up and +90 is straight down
++        // We are always pitching to "zero" whether up-right or inverted
++        //   but the control direction needed to get to up-right is different than inverted
++        // Determine if we're closer to up-right or inverted by checking for abs(roll attitude) > 90
++        // RTFL TODO:  Evaluate using hysteresis to ensure we don't get "stuck" at one of the inflection points below.
++        if (((attitude.raw[FD_ROLL] - angleTrim->raw[FD_ROLL]) / 10.0f) > 90.0f) {
++            // Rolled right closer to inverted, continue to roll right to inverted (+180 degrees)
++            if (axis == FD_PITCH) {
++                errorAngle = 0.0f + ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            } else if (axis == FD_ROLL) {
++                errorAngle = 180.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            }
++        } else if (((attitude.raw[FD_ROLL] - angleTrim->raw[FD_ROLL]) / 10.0f) < -90.0f) {
++            // Rolled left closer to inverted, continue to roll left to inverted (-180 degrees)
++            if (axis == FD_PITCH) {
++                errorAngle = 0.0f + ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            } else if (axis == FD_ROLL) {
++                errorAngle = -180.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            }
++        } else {
++            // We're rolled left or right between -90 and 90, and thus are closer to up-right (0 degrees aka skids down)
++            if (axis == FD_PITCH) {
++                errorAngle = 0.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            } else if (axis == FD_ROLL) {
++                errorAngle = 0.0f - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++            }
++        }
++        // NOTE:  If you want to level to only up-right, it would probably be best to just level inverted and
++        //   then flip to upright later on.
++        //   But if you really can only level to up-right (no negative collective avaiable), then it's probably
++        //     best to flip use the pitch direction logic above but just always roll back to up-right.
++        //   That way you will be putting in the correct pitch direction while you're inverted also.  Otherwise
++        //     you will be putting in the wrong pitch correction during the time you're inverted.  Not good, especially
++        //     since "roll" gets wonky near straight up/down.
++        currentPidSetpoint = errorAngle * levelGain;
++     }
++     else
++#endif
++     {
++        // Horizon and GPS Rescue modes
++        // calculate error angle and limit the angle to the max inclination
++        // rcDeflection is in range [-1.0, 1.0]
++        float angle = pidProfile->levelAngleLimit * getRcDeflection(axis);
++
++        // RTFL TODO:  Think about fixing GPS rescue for level/inverted rescue... probably just need to only make it worth it non-inverted rescue
++
+ #ifdef USE_GPS_RESCUE
+-    angle += gpsRescueAngle[axis] / 100; // ANGLE IS IN CENTIDEGREES
++        angle += gpsRescueAngle[axis] / 100; // ANGLE IS IN CENTIDEGREES
+ #endif
+-    angle = constrainf(angle, -pidProfile->levelAngleLimit, pidProfile->levelAngleLimit);
+-    const float errorAngle = angle - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+-    if (FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(GPS_RESCUE_MODE)) {
+-        // ANGLE mode - control is angle based
+-        currentPidSetpoint = errorAngle * levelGain;
+-    } else {
+-        // HORIZON mode - mix of ANGLE and ACRO modes
+-        // mix in errorAngle to currentPidSetpoint to add a little auto-level feel
+-        const float horizonLevelStrength = calcHorizonLevelStrength();
+-        currentPidSetpoint = currentPidSetpoint + (errorAngle * horizonGain * horizonLevelStrength);
++        angle = constrainf(angle, -pidProfile->levelAngleLimit, pidProfile->levelAngleLimit);
++
++        const float errorAngle = angle - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
++
++        if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
++            // ANGLE mode - control is angle based
++            currentPidSetpoint = errorAngle * levelGain;
++        } else {
++            // HORIZON mode - mix of ANGLE and ACRO modes
++            // mix in errorAngle to currentPidSetpoint to add a little auto-level feel
++            const float horizonLevelStrength = calcHorizonLevelStrength();
++            currentPidSetpoint = currentPidSetpoint + (errorAngle * horizonGain * horizonLevelStrength);
++        }
+     }
+     return currentPidSetpoint;
+ }
+@@ -1256,3 +1316,9 @@ float getCollectiveDeflectionAbsHPF()
+     return collectiveDeflectionAbsHPF;
+ }
+ 
++#ifdef USE_RTFL_RESCUE_MODE
++uint16_t pidGetRescueCollectiveSetting()
++{
++    return rescueCollective;
++}
++#endif
+diff --git a/src/main/flight/pid.h b/src/main/flight/pid.h
+index 4d8367f76..3c9564cb4 100644
+--- a/src/main/flight/pid.h
++++ b/src/main/flight/pid.h
+@@ -147,6 +147,7 @@ typedef struct pidProfile_s {
+     uint16_t collective_ff_impulse_freq;    // Collective input impulse high-pass filter cutoff frequency
+     uint8_t error_decay_always;             // Always decay accumulated I term and Abs Control error?
+     uint8_t error_decay_rate;               // Rate to decay accumulated error in deg/s
++    uint16_t rescue_collective;             // Collective pitch command when rescue is fully upright
+ 
+ } pidProfile_t;
+ 
+@@ -210,3 +211,4 @@ float pidGetSpikeLimitInverse();
+ float dynDtermLpfCutoffFreq(float throttle, uint16_t dynLpfMin, uint16_t dynLpfMax, uint8_t expo);
+ float getCollectiveDeflectionAbs();
+ float getCollectiveDeflectionAbsHPF();
++uint16_t pidGetRescueCollectiveSetting();
+diff --git a/src/main/target/common_pre.h b/src/main/target/common_pre.h
+index 41e15a5f4..1feca9e48 100644
+--- a/src/main/target/common_pre.h
++++ b/src/main/target/common_pre.h
+@@ -207,6 +207,7 @@
+ #define USE_SERIALRX_SUMD       // Graupner Hott protocol
+ 
+ #define USE_RTFL_ERROR_DECAY
++#define USE_RTFL_RESCUE_MODE
+ 
+ #if (TARGET_FLASH_SIZE > 128)
+ #define PID_PROFILE_COUNT 3

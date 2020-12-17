@@ -1,0 +1,386 @@
+commit 856db68c54eb175c101a7911993a7da82c542bec
+Author: Petri Mattila <petri.t.j.mattila@gmail.com>
+Date:   Sun Dec 13 18:45:40 2020 +0000
+
+    RTFL: Rename ANGLE to RESCUE
+    
+    Change all occurances of ANGLE_MODE and BOXANGLE
+    to RESCUE_MODE and BOXRESCUE.
+
+diff --git a/src/main/cli/cli.c b/src/main/cli/cli.c
+index 17b69306d..429afdf17 100644
+--- a/src/main/cli/cli.c
++++ b/src/main/cli/cli.c
+@@ -2245,13 +2245,13 @@ static void cliServo(const char *cmdName, char *cmdline)
+ #endif
+ 
+ static const char flightModeMapLetters[32] = {
+-    [ANGLE_MODE_BIT          ]  = 'A',
++    [RESCUE_MODE_BIT         ]  = 'R',
+     [HORIZON_MODE_BIT        ]  = 'H',
+     [PASSTHRU_MODE_BIT       ]  = 'P',
+     [FAILSAFE_MODE_BIT       ]  = 'F',
+     [GPS_RESCUE_MODE_BIT     ]  = 'G',
+ 
+-    [ANGLE_MODE_BIT      + 16]  = 'a',
++    [RESCUE_MODE_BIT     + 16]  = 'r',
+     [HORIZON_MODE_BIT    + 16]  = 'h',
+     [PASSTHRU_MODE_BIT   + 16]  = 'p',
+     [FAILSAFE_MODE_BIT   + 16]  = 'f',
+diff --git a/src/main/fc/core.c b/src/main/fc/core.c
+index 8e90a4473..f48d103e4 100644
+--- a/src/main/fc/core.c
++++ b/src/main/fc/core.c
+@@ -164,7 +164,7 @@ static bool accNeedsCalibration(void)
+         // ACC that would be affected by the lack of calibration.
+ 
+         // Check for any configured modes that use the ACC
+-        if (isModeActivationConditionPresent(BOXANGLE) ||
++        if (isModeActivationConditionPresent(BOXRESCUE) ||
+             isModeActivationConditionPresent(BOXHORIZON) ||
+             isModeActivationConditionPresent(BOXGPSRESCUE) ||
+             isModeActivationConditionPresent(BOXCAMSTAB) ||
+@@ -635,20 +635,20 @@ bool processRx(timeUs_t currentTimeUs)
+ 
+     bool canUseHorizonMode = true;
+ 
+-    if ((IS_RC_MODE_ACTIVE(BOXANGLE) || failsafeIsActive()) && (sensors(SENSOR_ACC))) {
++    if ((IS_RC_MODE_ACTIVE(BOXRESCUE) || failsafeIsActive()) && (sensors(SENSOR_ACC))) {
+         // bumpless transfer to Level mode
+         canUseHorizonMode = false;
+ 
+-        if (!FLIGHT_MODE(ANGLE_MODE)) {
+-            ENABLE_FLIGHT_MODE(ANGLE_MODE);
++        if (!FLIGHT_MODE(RESCUE_MODE)) {
++            ENABLE_FLIGHT_MODE(RESCUE_MODE);
+         }
+     } else {
+-        DISABLE_FLIGHT_MODE(ANGLE_MODE); // failsafe support
++        DISABLE_FLIGHT_MODE(RESCUE_MODE); // failsafe support
+     }
+ 
+     if (IS_RC_MODE_ACTIVE(BOXHORIZON) && canUseHorizonMode) {
+ 
+-        DISABLE_FLIGHT_MODE(ANGLE_MODE);
++        DISABLE_FLIGHT_MODE(RESCUE_MODE);
+ 
+         if (!FLIGHT_MODE(HORIZON_MODE)) {
+             ENABLE_FLIGHT_MODE(HORIZON_MODE);
+@@ -667,7 +667,7 @@ bool processRx(timeUs_t currentTimeUs)
+     }
+ #endif
+ 
+-    if (FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(HORIZON_MODE)) {
++    if (FLIGHT_MODE(RESCUE_MODE) || FLIGHT_MODE(HORIZON_MODE)) {
+         LED1_ON;
+         // increase frequency of attitude task to reduce drift when in angle or horizon mode
+         rescheduleTask(TASK_ATTITUDE, TASK_PERIOD_HZ(500));
+diff --git a/src/main/fc/rc.c b/src/main/fc/rc.c
+index 59c2012e8..7f51ffacb 100644
+--- a/src/main/fc/rc.c
++++ b/src/main/fc/rc.c
+@@ -699,7 +699,7 @@ FAST_CODE_NOINLINE void updateRcCommands(void)
+ #ifdef USE_RTFL_RESCUE_MODE
+     // RTFL:  Rescue (angle) mode overrides user's collective pitch rcCommand
+     // Check if rescue (angle) mode is active
+-    if (FLIGHT_MODE(ANGLE_MODE)) {    // || FLIGHT_MODE(GPS_RESCUE_MODE)
++    if (FLIGHT_MODE(RESCUE_MODE)) {    // || FLIGHT_MODE(GPS_RESCUE_MODE)
+         // attitude.values.roll/pitch = 0 when level, 1800 when fully inverted (decidegrees)
+         // Pitch is +90 / -90 at straight down and straight up.  Invert the absolute value of that so 0 = straight up/down
+         const float pitchCurrentInclination = 90.0f - (ABS(attitude.values.pitch) / 10.0f);
+diff --git a/src/main/fc/rc_controls.c b/src/main/fc/rc_controls.c
+index a3d3e1a95..633ed239d 100644
+--- a/src/main/fc/rc_controls.c
++++ b/src/main/fc/rc_controls.c
+@@ -266,8 +266,8 @@ void processRcStickPositions()
+ #endif
+ 
+ 
+-    if (FLIGHT_MODE(ANGLE_MODE|HORIZON_MODE)) {
+-        // in ANGLE or HORIZON mode, so use sticks to apply accelerometer trims
++    if (FLIGHT_MODE(RESCUE_MODE|HORIZON_MODE)) {
++        // in RESCUE or HORIZON mode, so use sticks to apply accelerometer trims
+         rollAndPitchTrims_t accelerometerTrimsDelta;
+         memset(&accelerometerTrimsDelta, 0, sizeof(accelerometerTrimsDelta));
+ 
+diff --git a/src/main/fc/rc_modes.h b/src/main/fc/rc_modes.h
+index 7235a8d22..9fcadeaea 100644
+--- a/src/main/fc/rc_modes.h
++++ b/src/main/fc/rc_modes.h
+@@ -30,7 +30,7 @@ typedef enum {
+     // ARM flag
+     BOXARM = 0,
+     // FLIGHT_MODE
+-    BOXANGLE,
++    BOXRESCUE,
+     BOXHORIZON,
+     BOXPASSTHRU,
+     BOXFAILSAFE,
+diff --git a/src/main/fc/runtime_config.h b/src/main/fc/runtime_config.h
+index f6b4fe7de..2947f1272 100644
+--- a/src/main/fc/runtime_config.h
++++ b/src/main/fc/runtime_config.h
+@@ -78,7 +78,7 @@ bool isArmingDisabled(void);
+ armingDisableFlags_e getArmingDisableFlags(void);
+ 
+ typedef enum {
+-    ANGLE_MODE_BIT       = 0,
++    RESCUE_MODE_BIT      = 0,
+     HORIZON_MODE_BIT     = 1,
+     PASSTHRU_MODE_BIT    = 2,
+     FAILSAFE_MODE_BIT    = 3,
+@@ -86,7 +86,7 @@ typedef enum {
+ } flightModeBits_e;
+ 
+ typedef enum {
+-    ANGLE_MODE           = BIT(ANGLE_MODE_BIT),
++    RESCUE_MODE          = BIT(RESCUE_MODE_BIT),
+     HORIZON_MODE         = BIT(HORIZON_MODE_BIT),
+     PASSTHRU_MODE        = BIT(PASSTHRU_MODE_BIT),
+     FAILSAFE_MODE        = BIT(FAILSAFE_MODE_BIT),
+@@ -102,7 +102,7 @@ extern uint16_t flightModeFlags;
+ // macro to initialize map from boxId_e flightModeBits. Keep it in sync with flightModeFlags_e enum.
+ // [BOXARM] is left unpopulated
+ #define BOXID_TO_FLIGHT_MODE_MAP_INITIALIZER {           \
+-   [BOXANGLE]       = ANGLE_MODE_BIT,                    \
++   [BOXRESCUE]      = RESCUE_MODE_BIT,                   \
+    [BOXHORIZON]     = HORIZON_MODE_BIT,                  \
+    [BOXPASSTHRU]    = PASSTHRU_MODE_BIT,                 \
+    [BOXFAILSAFE]    = FAILSAFE_MODE_BIT,                 \
+diff --git a/src/main/flight/pid.c b/src/main/flight/pid.c
+index 9b92f314f..831a01fd8 100644
+--- a/src/main/flight/pid.c
++++ b/src/main/flight/pid.c
+@@ -681,7 +681,7 @@ STATIC_UNIT_TESTED float calcHorizonLevelStrength(void)
+ FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, float currentPidSetpoint)
+ {
+ #ifdef USE_RTFL_RESCUE_MODE
+-     if (FLIGHT_MODE(ANGLE_MODE)) {
++     if (FLIGHT_MODE(RESCUE_MODE)) {
+         // Angle mode is now rescue mode.
+         float errorAngle = 0.0f;
+ 
+@@ -739,7 +739,7 @@ FAST_CODE_NOINLINE float pidLevel(int axis, const pidProfile_t *pidProfile, cons
+         const float errorAngle = angle - ((attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f);
+ 
+         if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
+-            // ANGLE mode - control is angle based
++            // Rescue mode - control is angle based
+             currentPidSetpoint = errorAngle * levelGain;
+         } else {
+             // HORIZON mode - mix of ANGLE and ACRO modes
+@@ -774,7 +774,7 @@ static FAST_CODE_NOINLINE float applyAcroTrainer(int axis, const rollAndPitchTri
+ {
+     float ret = setPoint;
+ 
+-    if (!FLIGHT_MODE(ANGLE_MODE) && !FLIGHT_MODE(HORIZON_MODE) && !FLIGHT_MODE(GPS_RESCUE_MODE)) {
++    if (!FLIGHT_MODE(RESCUE_MODE) && !FLIGHT_MODE(HORIZON_MODE) && !FLIGHT_MODE(GPS_RESCUE_MODE)) {
+         bool resetIterm = false;
+         float projectedAngle = 0;
+         const int setpointSign = acroTrainerSign(setPoint);
+@@ -1011,7 +1011,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
+ #if defined(USE_ACC)
+     const bool gpsRescueIsActive = FLIGHT_MODE(GPS_RESCUE_MODE);
+     levelMode_e levelMode;
+-    if (FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(HORIZON_MODE) || gpsRescueIsActive) {
++    if (FLIGHT_MODE(RESCUE_MODE) || FLIGHT_MODE(HORIZON_MODE) || gpsRescueIsActive) {
+         levelMode = LEVEL_MODE_RP;
+     } else {
+         levelMode = LEVEL_MODE_OFF;
+diff --git a/src/main/io/ledstrip.c b/src/main/io/ledstrip.c
+index 284390553..fdc731c54 100644
+--- a/src/main/io/ledstrip.c
++++ b/src/main/io/ledstrip.c
+@@ -156,7 +156,7 @@ static const modeColorIndexes_t defaultModeColors[] = {
+     //                          NORTH             EAST               SOUTH            WEST             UP          DOWN
+     [LED_MODE_ORIENTATION] = {{ COLOR_WHITE,      COLOR_DARK_VIOLET, COLOR_RED,       COLOR_DEEP_PINK, COLOR_BLUE, COLOR_ORANGE }},
+     [LED_MODE_HORIZON]     = {{ COLOR_BLUE,       COLOR_DARK_VIOLET, COLOR_YELLOW,    COLOR_DEEP_PINK, COLOR_BLUE, COLOR_ORANGE }},
+-    [LED_MODE_ANGLE]       = {{ COLOR_CYAN,       COLOR_DARK_VIOLET, COLOR_YELLOW,    COLOR_DEEP_PINK, COLOR_BLUE, COLOR_ORANGE }},
++    [LED_MODE_RESCUE]      = {{ COLOR_CYAN,       COLOR_DARK_VIOLET, COLOR_YELLOW,    COLOR_DEEP_PINK, COLOR_BLUE, COLOR_ORANGE }},
+ };
+ 
+ static const specialColorIndexes_t defaultSpecialColors[] = {
+@@ -453,7 +453,7 @@ static const struct {
+     uint8_t ledMode;
+ } flightModeToLed[] = {
+     {HORIZON_MODE,  LED_MODE_HORIZON},
+-    {ANGLE_MODE,    LED_MODE_ANGLE},
++    {RESCUE_MODE,   LED_MODE_RESCUE},
+     {0,             LED_MODE_ORIENTATION},
+ };
+ 
+diff --git a/src/main/io/ledstrip.h b/src/main/io/ledstrip.h
+index a79611202..3c10f31f5 100644
+--- a/src/main/io/ledstrip.h
++++ b/src/main/io/ledstrip.h
+@@ -98,7 +98,7 @@ typedef enum {
+ typedef enum {
+     LED_MODE_ORIENTATION = 0,
+     LED_MODE_HORIZON,
+-    LED_MODE_ANGLE,
++    LED_MODE_RESCUE,
+     LED_SPECIAL,
+     LED_AUX_CHANNEL
+ } ledModeIndex_e;
+diff --git a/src/main/msp/msp_box.c b/src/main/msp/msp_box.c
+index aae9cf645..81c02b04c 100644
+--- a/src/main/msp/msp_box.c
++++ b/src/main/msp/msp_box.c
+@@ -48,7 +48,7 @@
+ // permanent IDs must uniquely identify BOX meaning, DO NOT REUSE THEM!
+ static const box_t boxes[CHECKBOX_ITEM_COUNT] = {
+     { BOXARM, "ARM", 0 },
+-    { BOXANGLE, "ANGLE", 1 },
++    { BOXRESCUE, "RESCUE", 1 },
+     { BOXHORIZON, "HORIZON", 2 },
+ //    { BOXBARO, "BARO", 3 },
+ //    { BOXANTIGRAVITY, "ANTI GRAVITY", 4 },
+@@ -183,7 +183,7 @@ void initActiveBoxIds(void)
+     BME(BOXARM);
+     BME(BOXPREARM);
+     if (sensors(SENSOR_ACC)) {
+-        BME(BOXANGLE);
++        BME(BOXRESCUE);
+         BME(BOXHORIZON);
+     }
+ 
+diff --git a/src/main/osd/osd_elements.c b/src/main/osd/osd_elements.c
+index 1c60b7f64..c622a69c6 100644
+--- a/src/main/osd/osd_elements.c
++++ b/src/main/osd/osd_elements.c
+@@ -775,9 +775,9 @@ static void osdElementFlymode(osdElementParms_t *element)
+     if (FLIGHT_MODE(FAILSAFE_MODE)) {
+         strcpy(element->buff, "!FS!");
+     } else if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
++        strcpy(element->buff, "GRSC");
++    } else if (FLIGHT_MODE(RESCUE_MODE)) {
+         strcpy(element->buff, "RESC");
+-    } else if (FLIGHT_MODE(ANGLE_MODE)) {
+-        strcpy(element->buff, "ANGL");
+     } else if (FLIGHT_MODE(HORIZON_MODE)) {
+         strcpy(element->buff, "HOR ");
+     } else if (IS_RC_MODE_ACTIVE(BOXACROTRAINER)) {
+diff --git a/src/main/target/BEEBRAIN_V2F/config.c b/src/main/target/BEEBRAIN_V2F/config.c
+index ec6018e5e..5343acd38 100644
+--- a/src/main/target/BEEBRAIN_V2F/config.c
++++ b/src/main/target/BEEBRAIN_V2F/config.c
+@@ -154,7 +154,7 @@ void targetConfiguration(void)
+     osdElementConfigMutable()->item_pos[OSD_G_FORCE]            &= ~OSD_PROFILE_1_FLAG;
+     osdElementConfigMutable()->item_pos[OSD_FLIP_ARROW]         &= ~OSD_PROFILE_1_FLAG;
+ 
+-    modeActivationConditionsMutable(0)->modeId           = BOXANGLE;
++    modeActivationConditionsMutable(0)->modeId           = BOXRESCUE;
+     modeActivationConditionsMutable(0)->auxChannelIndex  = AUX2 - NON_AUX_CHANNEL_COUNT;
+     modeActivationConditionsMutable(0)->range.startStep  = CHANNEL_VALUE_TO_STEP(900);
+     modeActivationConditionsMutable(0)->range.endStep    = CHANNEL_VALUE_TO_STEP(2100);
+diff --git a/src/main/target/COLIBRI_RACE/i2c_bst.c b/src/main/target/COLIBRI_RACE/i2c_bst.c
+index 780be5d6f..733618614 100644
+--- a/src/main/target/COLIBRI_RACE/i2c_bst.c
++++ b/src/main/target/COLIBRI_RACE/i2c_bst.c
+@@ -151,7 +151,7 @@ typedef struct box_e {
+ // FIXME remove ;'s
+ static const box_t boxes[CHECKBOX_ITEM_COUNT + 1] = {
+     { BOXARM, "ARM;", 0 },
+-    { BOXANGLE, "ANGLE;", 1 },
++    { BOXRESCUE, "RESCUE;", 1 },
+     { BOXHORIZON, "HORIZON;", 2 },
+     //{ BOXVARIO, "VARIO;", 4 },
+     { BOXCAMSTAB, "CAMSTAB;", 8 },
+@@ -286,7 +286,7 @@ static bool bstSlaveProcessFeedbackCommand(uint8_t bstRequest)
+             // Requires new Multiwii protocol version to fix
+             // It would be preferable to setting the enabled bits based on BOXINDEX.
+             junk = 0;
+-            tmp = IS_ENABLED(FLIGHT_MODE(ANGLE_MODE)) << BOXANGLE |
++            tmp = IS_ENABLED(FLIGHT_MODE(RESCUE_MODE)) << BOXRESCUE |
+                     IS_ENABLED(FLIGHT_MODE(HORIZON_MODE)) << BOXHORIZON |
+                     IS_ENABLED(IS_RC_MODE_ACTIVE(BOXCAMSTAB)) << BOXCAMSTAB |
+                     IS_ENABLED(FLIGHT_MODE(PASSTHRU_MODE)) << BOXPASSTHRU |
+@@ -839,7 +839,7 @@ bool writeFCModeToBST(void)
+ {
+     uint8_t tmp = 0;
+     tmp = IS_ENABLED(ARMING_FLAG(ARMED)) |
+-           IS_ENABLED(FLIGHT_MODE(ANGLE_MODE)) << 1 |
++           IS_ENABLED(FLIGHT_MODE(RESCUE_MODE)) << 1 |
+            IS_ENABLED(FLIGHT_MODE(HORIZON_MODE)) << 2 |
+            IS_ENABLED(FLIGHT_MODE(FAILSAFE_MODE)) << 7;
+ 
+diff --git a/src/main/target/MULTIFLITEPICO/config.c b/src/main/target/MULTIFLITEPICO/config.c
+index 320275e3c..a25df0c3d 100644
+--- a/src/main/target/MULTIFLITEPICO/config.c
++++ b/src/main/target/MULTIFLITEPICO/config.c
+@@ -65,7 +65,7 @@ void targetConfiguration(void)
+     rcControlsConfigMutable()->yaw_deadband = 2;
+     rcControlsConfigMutable()->deadband = 2;
+ 
+-    modeActivationConditionsMutable(0)->modeId          = BOXANGLE;
++    modeActivationConditionsMutable(0)->modeId          = BOXRESCUE;
+     modeActivationConditionsMutable(0)->auxChannelIndex = AUX1 - NON_AUX_CHANNEL_COUNT;
+     modeActivationConditionsMutable(0)->range.startStep = CHANNEL_VALUE_TO_STEP(900);
+     modeActivationConditionsMutable(0)->range.endStep   = CHANNEL_VALUE_TO_STEP(1400);
+diff --git a/src/main/telemetry/crsf.c b/src/main/telemetry/crsf.c
+index db324c05b..560c28e17 100644
+--- a/src/main/telemetry/crsf.c
++++ b/src/main/telemetry/crsf.c
+@@ -288,8 +288,8 @@ void crsfFrameFlightMode(sbuf_t *dst)
+         flightMode = "RTH";
+     } else if (FLIGHT_MODE(PASSTHRU_MODE)) {
+         flightMode = "MANU";
+-    } else if (FLIGHT_MODE(ANGLE_MODE)) {
+-        flightMode = "STAB";
++    } else if (FLIGHT_MODE(RESCUE_MODE)) {
++        flightMode = "RESC";
+     } else if (FLIGHT_MODE(HORIZON_MODE)) {
+         flightMode = "HOR";
+     }
+diff --git a/src/main/telemetry/ibus_shared.c b/src/main/telemetry/ibus_shared.c
+index 82e0443e1..9fefab9ab 100644
+--- a/src/main/telemetry/ibus_shared.c
++++ b/src/main/telemetry/ibus_shared.c
+@@ -254,7 +254,7 @@ static uint16_t getRPM()
+ static uint16_t getMode()
+ {
+     uint16_t flightMode = 1; //Acro
+-    if (FLIGHT_MODE(ANGLE_MODE)) {
++    if (FLIGHT_MODE(RESCUE_MODE)) {
+          flightMode = 0; //Stab
+     }
+     if (FLIGHT_MODE(PASSTHRU_MODE)) {
+diff --git a/src/main/telemetry/ltm.c b/src/main/telemetry/ltm.c
+index bb55e32e8..00b2337ad 100644
+--- a/src/main/telemetry/ltm.c
++++ b/src/main/telemetry/ltm.c
+@@ -174,7 +174,7 @@ static void ltm_sframe(void)
+     uint8_t lt_statemode;
+     if (FLIGHT_MODE(PASSTHRU_MODE))
+         lt_flightmode = 0;
+-    else if (FLIGHT_MODE(ANGLE_MODE))
++    else if (FLIGHT_MODE(RESCUE_MODE))
+         lt_flightmode = 2;
+     else if (FLIGHT_MODE(HORIZON_MODE))
+         lt_flightmode = 3;
+diff --git a/src/main/telemetry/mavlink.c b/src/main/telemetry/mavlink.c
+index bf93d5229..ae28a2a28 100644
+--- a/src/main/telemetry/mavlink.c
++++ b/src/main/telemetry/mavlink.c
+@@ -463,7 +463,7 @@ void mavlinkSendHUDAndHeartbeat(void)
+     // Custom mode for compatibility with APM OSDs
+     uint8_t mavCustomMode = 1;  // Acro by default
+ 
+-    if (FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(HORIZON_MODE)) {
++    if (FLIGHT_MODE(RESCUE_MODE) || FLIGHT_MODE(HORIZON_MODE)) {
+         mavCustomMode = 0;      //Stabilize
+         mavModes |= MAV_MODE_FLAG_STABILIZE_ENABLED;
+     }
+diff --git a/src/main/telemetry/smartport.c b/src/main/telemetry/smartport.c
+index 1f29fb833..8e537ee86 100644
+--- a/src/main/telemetry/smartport.c
++++ b/src/main/telemetry/smartport.c
+@@ -754,7 +754,7 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
+                     tmpi += 4;
+                 }
+ 
+-                if (FLIGHT_MODE(ANGLE_MODE)) {
++                if (FLIGHT_MODE(RESCUE_MODE)) {
+                     tmpi += 10;
+                 }
+                 if (FLIGHT_MODE(HORIZON_MODE)) {

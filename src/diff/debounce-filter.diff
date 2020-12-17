@@ -1,0 +1,162 @@
+commit 5e337ed2cbabc772eb8890035ee465f65c0368f7
+Author: Petri Mattila <petri.t.j.mattila@gmail.com>
+Date:   Sun Dec 13 18:45:41 2020 +0000
+
+    RTFL: Add elevator de-bounce filter
+    
+    Added an elevator filter to try and prevent bouncing on the pitch
+    axis with fast movements to center stick.
+    
+    Code borrowed from the Heliflight3D commit
+    
+      "HF3D: Add Elevator de-bounce filter"
+
+diff --git a/src/main/cli/settings.c b/src/main/cli/settings.c
+index d6d09546e..b5805998d 100644
+--- a/src/main/cli/settings.c
++++ b/src/main/cli/settings.c
+@@ -1028,6 +1028,12 @@ const clivalue_t valueTable[] = {
+ #ifdef USE_RTFL_RESCUE_MODE
+     { "rescue_collective",              VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 50, 500 },PG_PID_PROFILE, offsetof(pidProfile_t, rescue_collective) },
+ #endif
++#ifdef USE_RTFL_ELEVATOR_FILTER
++    { "elevator_filter_gain",           VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_gain) },
++    { "elevator_filter_window_time",    VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 255 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_window_time) },
++    { "elevator_filter_window_size",    VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_window_size) },
++    { "elevator_filter_hz",             VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 },PG_PID_PROFILE, offsetof(pidProfile_t, elevator_filter_hz) },
++#endif
+ 
+ // PG_TELEMETRY_CONFIG
+ #ifdef USE_TELEMETRY
+diff --git a/src/main/flight/pid.c b/src/main/flight/pid.c
+index 831a01fd8..8cb76c970 100644
+--- a/src/main/flight/pid.c
++++ b/src/main/flight/pid.c
+@@ -166,6 +166,10 @@ void resetPidProfile(pidProfile_t *pidProfile)
+         .error_decay_always = 0,
+         .error_decay_rate = 7,
+         .rescue_collective = 200,
++        .elevator_filter_gain = 50,
++        .elevator_filter_window_time = 75,
++        .elevator_filter_window_size = 30,
++        .elevator_filter_hz = 15,
+     );
+ }
+ 
+@@ -242,6 +246,9 @@ static FAST_RAM_ZERO_INIT float ffBoostFactor;
+ static FAST_RAM_ZERO_INIT float ffSmoothFactor;
+ static FAST_RAM_ZERO_INIT float ffSpikeLimitInverse;
+ 
++static FAST_RAM_ZERO_INIT filterApplyFnPtr elevatorFilterLowpassApplyFn;
++static FAST_RAM_ZERO_INIT pt1Filter_t elevatorFilterLowpass;
++
+ float pidGetSpikeLimitInverse()
+ {
+     return ffSpikeLimitInverse;
+@@ -267,6 +274,7 @@ void pidInitFilters(const pidProfile_t *pidProfile)
+         dtermNotchApplyFn = nullFilterApply;
+         dtermLowpassApplyFn = nullFilterApply;
+         ptermYawLowpassApplyFn = nullFilterApply;
++        elevatorFilterLowpassApplyFn = nullFilterApply;
+         return;
+     }
+ 
+@@ -381,6 +389,16 @@ void pidInitFilters(const pidProfile_t *pidProfile)
+     //   RC = 1 / ( 2 * M_PI_FLOAT * f_cut);  ==> RC = 3.183
+     //   k = dT / (RC + dT);                  ==>  k = 0.0000393 for 8kHz
+     collectivePulseFilterGain = dT / (dT + (1 / ( 2 * 3.14159f * (float)pidProfile->collective_ff_impulse_freq / 100.0f)));
++
++#ifdef USE_RTFL_ELEVATOR_FILTER
++    // RTFL:  Elevator Filter (helicopter tail de-bounce)
++    if (pidProfile->elevator_filter_hz == 0 || pidProfile->elevator_filter_hz > pidFrequencyNyquist) {
++        elevatorFilterLowpassApplyFn = nullFilterApply;
++    } else {
++        elevatorFilterLowpassApplyFn = (filterApplyFnPtr)pt1FilterApply;
++        pt1FilterInit(&elevatorFilterLowpass, pt1FilterGain(pidProfile->elevator_filter_hz, dT));
++    }
++#endif
+ }
+ 
+ #ifdef USE_RC_SMOOTHING_FILTER
+@@ -1177,11 +1195,39 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
+ #endif
+ 
+         const float feedforwardGain = pidCoefficient[axis].Kf;
++        static timeUs_t lastTimeEleOutsideWindow = 0;
++        float eleOffset = 0.0f;
+ 
+         if (feedforwardGain > 0) {
+             // transition = 1 if feedForwardTransition == 0  (no transition)
+             float transition = (feedForwardTransition > 0) ? MIN(1.0, getRcDeflectionAbs(axis) * feedForwardTransition) : 1.0;
+ 
++#ifdef USE_RTFL_ELEVATOR_FILTER
++            // Apply elevator filter to stop bounces due to sudden stops on the pitch axis near zero deg/s
++            //  These do not seem to be related to I term or Absolute control, or really any of the PID terms
++            //  High feedforward gain seems to make them worse due to the aggressive nature of the return to zero.
++            if (axis == FD_PITCH && pidProfile->elevator_filter_gain > 0) {
++                float elevatorSetpointLPF = elevatorFilterLowpassApplyFn((filter_t *) &elevatorFilterLowpass, currentPidSetpoint);
++                // Store the last time we were outside of the deg/s window we decided upon
++                if (fabsf(currentPidSetpoint) >= pidProfile->elevator_filter_window_size) {
++                    lastTimeEleOutsideWindow = currentTimeUs;
++                } else if (cmpTimeUs(currentTimeUs, lastTimeEleOutsideWindow) < (pidProfile->elevator_filter_window_time * 1000)) {
++                    // We're inside the deg/s window and we've recently been outside of it
++                    // Cutoff time for compare should be maybe 2-3x the cutoff frequency period??
++                    //  Note that this will also catch the times that we're just transiting through center quickly... which sucks, but what is the other choice??
++                    //  Luckily, the moment we get outside the window we'll go back to full blast of feedforward on the pitch axis, so it may not be very noticeable during fast stick movements.
++
++                    // Apply the elevator filter offset to help gradually slow us down.
++                    // There will be a slightly discontinuity in the pitch feedforward as we hit the elevator filter window.
++                    // Should be relative to the amount of feedforward gain.  More Kf -> More elevator offset.
++                    // elevator_filter_gain = 100 will give 1:1 offset between the LPF and setPoint.
++                    //   As we enter the window eleOffset will start high and slowly decay down to zero over time.
++                    eleOffset = (elevatorSetpointLPF - currentPidSetpoint) * feedforwardGain * 90.0f * transition * pidProfile->elevator_filter_gain / 100.0f;
++                }
++                // If it's been a while since we've been outside of our cutoff window then don't do anything different.
++                //   Otherwise we will slow down fast stick movements, and we don't want that!  We only want to change the stop characteristics around center stick.
++            }
++#endif
+             // RTFL: Direct stick feedforward for roll and pitch. Stick delta feedforward for yaw.
+             float feedForward;
+             if (axis == FD_YAW)
+@@ -1189,6 +1235,14 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
+             else
+                 feedForward = feedforwardGain * transition * currentPidSetpoint;
+ 
++#ifdef USE_RTFL_ELEVATOR_FILTER
++            if (axis == FD_PITCH) {
++                feedForward += eleOffset;
++                // Store the elevator filter offset value into the AC_CORRECTION debug channel (absolute control) since it isn't used otherwise
++                DEBUG_SET(DEBUG_AC_CORRECTION, 3, lrintf(eleOffset));
++            }
++#endif
++
+ #ifdef USE_INTERPOLATED_SP
+             if (shouldApplyFfLimits(axis))
+                 pidData[axis].F = applyFfLimit(axis, feedForward, pidCoefficient[axis].Kp, currentPidSetpoint);
+diff --git a/src/main/flight/pid.h b/src/main/flight/pid.h
+index 3c9564cb4..f81a115fb 100644
+--- a/src/main/flight/pid.h
++++ b/src/main/flight/pid.h
+@@ -148,6 +148,10 @@ typedef struct pidProfile_s {
+     uint8_t error_decay_always;             // Always decay accumulated I term and Abs Control error?
+     uint8_t error_decay_rate;               // Rate to decay accumulated error in deg/s
+     uint16_t rescue_collective;             // Collective pitch command when rescue is fully upright
++    uint16_t elevator_filter_gain;          // Elevator stop de-bounce feedforward filter gain
++    uint8_t elevator_filter_window_time;    // Time in ms that we no longer apply de-bounce inside our window
++    uint8_t elevator_filter_window_size;    // Size of the de-bounce window around center stick (0 deg/s) in degrees/second
++    uint8_t elevator_filter_hz;             // Low-pass filter cutoff frequency that is applied to our elevator setpoint.  Lower Hz = more delay on stop.
+ 
+ } pidProfile_t;
+ 
+diff --git a/src/main/target/common_pre.h b/src/main/target/common_pre.h
+index 1feca9e48..807c19c62 100644
+--- a/src/main/target/common_pre.h
++++ b/src/main/target/common_pre.h
+@@ -208,6 +208,7 @@
+ 
+ #define USE_RTFL_ERROR_DECAY
+ #define USE_RTFL_RESCUE_MODE
++#define USE_RTFL_ELEVATOR_FILTER
+ 
+ #if (TARGET_FLASH_SIZE > 128)
+ #define PID_PROFILE_COUNT 3
